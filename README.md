@@ -1,36 +1,161 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 📋 离线问卷二维码传输系统
 
-## Getting Started
+> 患者填写问卷 → 编码压缩 → 生成二维码 → 医院扫码 → 解码还原
 
-First, run the development server:
+一套**完全离线**的医疗问卷数据传输方案。患者在候诊时填写电子问卷，答案经过编码压缩后生成二维码，医生扫码即可还原全部数据——全程无需联网。
+
+## ✨ 核心特性
+
+- 🔒 **完全离线** — 数据通过二维码传输，无需网络
+- 📦 **高效压缩** — 自定义编码 + LZ-String 压缩，70-80% 压缩率
+- 📊 **实时反馈** — 填写时实时显示体积、容量预警、字数限制
+- 📱 **多端适配** — 响应式设计，支持手机和电脑
+- 🎯 **智能编码** — 多选题自动选择最优编码策略（列表/位图/组合映射）
+
+## 📸 功能模块
+
+| 模块 | 路径 | 说明 |
+|------|------|------|
+| 🏠 首页 | `/` | 系统入口导航 |
+| 👤 患者端 | `/patient` | 填写问卷 → 生成数据二维码 |
+| 🏥 医院端 | `/hospital` | 扫码 / 手动输入 / 图片上传 → 解码查看 |
+| 📱 问卷二维码 | `/share` | 生成问卷链接二维码（打印张贴用）|
+| 🧪 极限测试 | `/stress-test` | 40 题压力测试，验证容量极限 |
+
+## 🚀 快速开始
+
+### 环境要求
+
+- Node.js 20+
+- pnpm（推荐）或 npm
+
+### 安装 & 启动
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+# 克隆项目
+git clone <repo-url>
+cd offline-questionnaire-qrcode
+
+# 安装依赖
+pnpm install
+
+# 开发模式
 pnpm dev
-# or
-bun dev
+
+# 生产模式（推荐局域网/手机测试）
+pnpm build && pnpm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+访问 http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 局域网访问（手机测试）
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm dev:lan
+# 手机访问 http://<你的IP>:3000
+```
 
-## Learn More
+> ⚠️ 摄像头扫码功能需要 HTTPS 环境。本地 `localhost` 可用，局域网 IP 需部署到 Vercel。
 
-To learn more about Next.js, take a look at the following resources:
+## 🏗️ 技术栈
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Next.js | 16.2 | 全栈框架 |
+| React | 19.2 | UI 层 |
+| TypeScript | 5.x | 类型安全 |
+| Tailwind CSS | 4.x | 样式 |
+| lz-string | 1.5 | 数据压缩 |
+| qrcode | 1.5 | 二维码生成 |
+| html5-qrcode | 2.3 | 摄像头扫码 |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 📐 数据流
 
-## Deploy on Vercel
+```
+问卷答案 (JSON ~2800 字符)
+    │
+    ▼ 自定义编码
+编码字符串 (~860 字符)
+    │  单选: "1:SM"  数值: "19:NZ" (Base36)
+    │  多选: "11:MBABC" (位图)  文本: URI encode
+    ▼ LZ-String 压缩
+压缩字符串 (~650 字符)
+    │
+    ▼ QR Code 生成
+二维码图片
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 📏 二维码容量
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| 状态 | 范围 | 说明 |
+|------|------|------|
+| 🟢 安全 | < 1,500 字符 | 二维码清晰，秒扫 |
+| 🟡 警告 | 1,500 ~ 2,200 字符 | 二维码较密，仍可扫 |
+| 🔴 超限 | > 2,200 字符 | 可能生成失败或无法识别 |
+
+实测 40 题全填满 → 压缩后约 1,300 字符，在安全范围内。
+
+## 🎯 多选题编码策略
+
+系统自动为每道多选题选择最短的编码方式：
+
+| 策略 | 原理 | 适用场景 | 示例 |
+|------|------|----------|------|
+| 列表 | 直接拼接选项 ID | 选项少、选得少 | `MLABC` |
+| 位图 | 二进制位 → Base36 | 选项多 (>6) | `MB15` |
+| 组合映射 | 组合 → 索引号 | 组合总数 ≤ 1296 | `MC5` |
+
+## 📁 项目结构
+
+```
+src/
+├── app/
+│   ├── page.tsx              # 首页
+│   ├── patient/page.tsx      # 患者端
+│   ├── hospital/page.tsx     # 医院端
+│   ├── share/page.tsx        # 问卷二维码
+│   ├── stress-test/page.tsx  # 极限测试
+│   └── layout.tsx            # 全局布局
+├── lib/
+│   ├── encoder.ts            # 编码 / 解码
+│   ├── compressor.ts         # LZ-String 压缩
+│   ├── volume-calculator.ts  # 体积计算
+│   ├── questions.ts          # 基础问卷 (10 题)
+│   └── stress-test.ts        # 压测问卷 (40 题)
+└── types/
+    └── index.ts              # TypeScript 类型
+```
+
+## 🌐 部署
+
+推荐部署到 Vercel（自动 HTTPS，摄像头扫码可用）：
+
+```bash
+# 方式一：CLI 部署
+npm i -g vercel
+vercel --prod
+
+# 方式二：GitHub 连接 Vercel Dashboard 自动部署
+```
+
+详见 [DEPLOY.md](./DEPLOY.md)
+
+## 📖 操作指引
+
+完整的操作指引文档（含每个页面的详细步骤、FAQ）：
+
+👉 [GUIDE.md](./GUIDE.md)
+
+## 🔧 开发命令
+
+```bash
+pnpm dev          # 开发模式
+pnpm dev:lan      # 局域网模式（0.0.0.0）
+pnpm build        # 生产构建
+pnpm start        # 生产启动
+pnpm lint         # ESLint 检查
+```
+
+## 📝 License
+
+Private — 仅限内部使用
