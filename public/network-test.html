@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>网络测试</title>
+  <style>
+    body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
+    .test { margin: 20px 0; padding: 15px; border: 2px solid #ddd; border-radius: 8px; }
+    .success { border-color: #4caf50; background: #e8f5e9; }
+    .error { border-color: #f44336; background: #ffebee; }
+    button { padding: 10px 20px; margin: 5px; font-size: 16px; cursor: pointer; }
+    pre { background: #f5f5f5; padding: 10px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>🌐 网络诊断测试</h1>
+  
+  <div class="test">
+    <h3>1. 基本信息</h3>
+    <div id="basic"></div>
+  </div>
+  
+  <div class="test">
+    <h3>2. JavaScript 测试</h3>
+    <button onclick="testJS()">运行测试</button>
+    <div id="js-result"></div>
+  </div>
+  
+  <div class="test">
+    <h3>3. 网络请求测试</h3>
+    <button onclick="testFetch()">测试 Fetch</button>
+    <div id="fetch-result"></div>
+  </div>
+  
+  <div class="test">
+    <h3>4. 控制台输出</h3>
+    <pre id="logs"></pre>
+  </div>
+
+  <script>
+    const logs = [];
+    function log(msg) {
+      logs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+      document.getElementById('logs').textContent = logs.join('\n');
+    }
+
+    // 基本信息
+    document.getElementById('basic').innerHTML = `
+      <p><strong>URL:</strong> ${window.location.href}</p>
+      <p><strong>协议:</strong> ${window.location.protocol}</p>
+      <p><strong>主机:</strong> ${window.location.host}</p>
+      <p><strong>IP:</strong> ${window.location.hostname}</p>
+    `;
+    log('页面加载完成');
+
+    // JavaScript 测试
+    function testJS() {
+      try {
+        const result = {
+          hasWindow: typeof window !== 'undefined',
+          hasDocument: typeof document !== 'undefined',
+          hasConsole: typeof console !== 'undefined',
+          hasFetch: typeof fetch !== 'undefined',
+          hasLocalStorage: typeof localStorage !== 'undefined',
+          test: 'JavaScript 运行正常',
+        };
+        document.getElementById('js-result').innerHTML = `<pre>${JSON.stringify(result, null, 2)}</pre>`;
+        document.getElementById('js-result').className = 'test success';
+        log('JavaScript 测试通过');
+      } catch (e) {
+        document.getElementById('js-result').innerHTML = `<p class="error">错误：${e.message}</p>`;
+        log('JavaScript 测试失败：' + e.message);
+      }
+    }
+
+    // Fetch 测试
+    function testFetch() {
+      log('开始 Fetch 测试...');
+      
+      // 测试访问根路径
+      fetch('/').then(res => {
+        log(`✓ 根路径访问成功：${res.status}`);
+        document.getElementById('fetch-result').innerHTML += `<p class="success">✓ 根路径：${res.status}</p>`;
+      }).catch(err => {
+        log(`✗ 根路径访问失败：${err.message}`);
+        document.getElementById('fetch-result').innerHTML += `<p class="error">✗ 根路径：${err.message}</p>`;
+      });
+
+      // 测试访问 JS 文件
+      fetch('/_next/static/chunks/main.js').then(res => {
+        log(`✓ JS 文件访问成功：${res.status}`);
+        document.getElementById('fetch-result').innerHTML += `<p class="success">✓ JS 文件：${res.status}</p>`;
+      }).catch(err => {
+        log(`✗ JS 文件访问失败：${err.message}`);
+        document.getElementById('fetch-result').innerHTML += `<p class="error">✗ JS 文件：${err.message}</p>`;
+      });
+    }
+
+    // 自动运行
+    setTimeout(() => {
+      log('准备就绪');
+    }, 1000);
+  </script>
+</body>
+</html>
