@@ -129,21 +129,21 @@ export default function StressTestPage() {
       
       setResults(result);
       
-      // 7. 生成二维码
+      // 7. 生成二维码（大尺寸 + 中等纠错，提高手机扫码成功率）
       try {
         const dataUrl = await QRCode.toDataURL(compressed, {
-          width: 400,
-          margin: 2,
-          errorCorrectionLevel: 'L', // 最低纠错 → 最大容量
+          width: 800,
+          margin: 4,
+          errorCorrectionLevel: 'M', // 中等纠错，兼顾容量和扫码可靠性
         });
         setQrDataUrl(dataUrl);
       } catch (qrErr: any) {
-        console.error('二维码生成失败:', qrErr);
-        // 超限时尝试更低纠错
+        console.error('二维码生成失败（M纠错）:', qrErr);
+        // M纠错超限时降级到L
         try {
-          const dataUrl = await QRCode.toDataURL(compressed.slice(0, 2200), {
-            width: 400,
-            margin: 1,
+          const dataUrl = await QRCode.toDataURL(compressed, {
+            width: 800,
+            margin: 4,
             errorCorrectionLevel: 'L',
           });
           setQrDataUrl(dataUrl);
@@ -245,10 +245,43 @@ export default function StressTestPage() {
             {qrDataUrl && (
               <section className="bg-white rounded-xl shadow p-6 text-center">
                 <h2 className="text-xl font-semibold mb-4">📱 生成的二维码</h2>
-                <img src={qrDataUrl} alt="QR" className="mx-auto border-4 border-blue-100 rounded-lg" />
+                <img src={qrDataUrl} alt="QR" className="mx-auto border-4 border-blue-100 rounded-lg" style={{ maxWidth: '500px', width: '100%' }} />
                 <p className="text-sm text-gray-500 mt-3">
                   包含 {results.questionCount} 题完整答案，压缩后 {results.compressedLength} 字符
                 </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  纠错级别 M · 图片 800px · 点击下方按钮放大扫码
+                </p>
+                <div className="flex gap-3 justify-center mt-4">
+                  <button
+                    onClick={() => {
+                      const win = window.open('', '_blank');
+                      if (win) {
+                        win.document.write(
+                          '<html><head><title>扫码 - 极限测试二维码</title>' +
+                          '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+                          '<style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fff}img{max-width:95vw;max-height:95vh}</style>' +
+                          '</head><body><img src="' + qrDataUrl + '" /></body></html>'
+                        );
+                        win.document.close();
+                      }
+                    }}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                  >
+                    🔍 全屏查看（方便扫码）
+                  </button>
+                  <button
+                    onClick={() => {
+                      const link = document.createElement('a');
+                      link.download = 'stress-test-qr.png';
+                      link.href = qrDataUrl;
+                      link.click();
+                    }}
+                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
+                  >
+                    💾 下载图片
+                  </button>
+                </div>
               </section>
             )}
 
