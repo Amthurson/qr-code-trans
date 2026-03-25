@@ -6,6 +6,39 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { decompress } from '@/lib/compressor';
 import { decodeQuestionnaire } from '@/lib/encoder';
 import { scoliosisQuestionnaire } from '@/lib/questions';
+import { stressTestQuestionnaire } from '@/lib/stress-test';
+import type { QuestionnaireTemplate, Question } from '@/types';
+
+// 所有已知问卷模板
+const ALL_TEMPLATES: QuestionnaireTemplate[] = [
+  scoliosisQuestionnaire,
+  stressTestQuestionnaire,
+];
+
+// 根据解码出的题目 ID 自动匹配最佳模板
+function findBestTemplate(answerIds: number[]): QuestionnaireTemplate {
+  let bestTemplate = scoliosisQuestionnaire;
+  let bestMatchCount = 0;
+
+  for (const tpl of ALL_TEMPLATES) {
+    const tplIds = new Set(tpl.questions.map(q => q.id));
+    const matchCount = answerIds.filter(id => tplIds.has(id)).length;
+    if (matchCount > bestMatchCount) {
+      bestMatchCount = matchCount;
+      bestTemplate = tpl;
+    }
+  }
+  return bestTemplate;
+}
+
+// 从所有模板中查找题目定义（兜底）
+function findQuestion(questionId: number): Question | undefined {
+  for (const tpl of ALL_TEMPLATES) {
+    const q = tpl.questions.find(q => q.id === questionId);
+    if (q) return q;
+  }
+  return undefined;
+}
 
 export default function HospitalPage() {
   const router = useRouter();
@@ -177,10 +210,22 @@ export default function HospitalPage() {
       catch { decoded = decodeQuestionnaire(decompress(code)); }
 
       const answers: any = {};
+      const answerIds = Object.keys(decoded.answers).map(Number);
+      const template = findBestTemplate(answerIds);
+      
       for (const [qid, answer] of Object.entries(decoded.answers)) {
-        const question = scoliosisQuestionnaire.questions.find(q => q.id === parseInt(qid));
-        if (!question) continue;
-        answers[parseInt(qid)] = {
+        const questionId = parseInt(qid);
+        const question = findQuestion(questionId);
+        if (!question) {
+          // 未知题目也显示原始数据，不跳过
+          answers[questionId] = {
+            question: { id: questionId, title: `题目 ${questionId}`, type: 'unknown', required: false },
+            answer,
+            displayText: formatAnswer(answer, { options: [] }),
+          };
+          continue;
+        }
+        answers[questionId] = {
           question, answer,
           displayText: formatAnswer(answer, question),
         };
