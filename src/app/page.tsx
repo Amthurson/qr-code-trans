@@ -93,6 +93,28 @@ export default function Home() {
           </Link>
         </div>
 
+        {/* 新增：文件传输入口 */}
+        <div className="text-center mb-12">
+          <Link 
+            href="/file-transfer"
+            className="inline-block p-8 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
+          >
+            <div className="text-6xl mb-4">📦</div>
+            <h2 className="text-2xl font-bold text-white mb-2">
+              离线文件传输
+            </h2>
+            <p className="text-indigo-100">
+              支持任意文件类型，通过二维码序列传输
+            </p>
+            <ul className="text-xs text-indigo-200 space-y-1 mt-3">
+              <li>✓ 任意文件格式</li>
+              <li>✓ 自动分片编码</li>
+              <li>✓ 连续扫码传输</li>
+              <li>✓ CRC32 校验保护</li>
+            </ul>
+          </Link>
+        </div>
+
         {/* 特性说明 */}
         <div className="mt-16 max-w-4xl mx-auto">
           <h3 className="text-2xl font-bold text-center text-gray-900 mb-8">
