@@ -143,6 +143,50 @@ export default function ReceiveFilePage() {
     setScanStatus('scanning');
 
     try {
+      // 1. 先请求摄像头权限（和医院端一样）
+      console.log('📷 请求摄像头权限...');
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: selectedCamera === 'user' ? 'user' : 'environment' } 
+      });
+      // 立即释放预览流
+      stream.getTracks().forEach(t => t.stop());
+      console.log('✅ 权限已获取');
+      
+      // 2. 获取摄像头列表
+      const devices = await Html5Qrcode.getCameras();
+      console.log('可用摄像头:', devices);
+      
+      if (devices.length === 0) {
+        throw new Error('未找到摄像头设备');
+      }
+      
+      // 3. 选择摄像头
+      let selectedCam;
+      if (selectedCamera === 'user') {
+        // 前置摄像头
+        selectedCam = devices.find(d => 
+          d.label.toLowerCase().includes('front') ||
+          d.label.toLowerCase().includes('user') ||
+          d.label.toLowerCase().includes('face')
+        ) || devices[0];
+      } else {
+        // 后置摄像头
+        selectedCam = devices.find(d => 
+          d.label.toLowerCase().includes('back') ||
+          d.label.toLowerCase().includes('rear') ||
+          d.label.toLowerCase().includes('environment')
+        ) || devices[0];
+      }
+      console.log('选择摄像头:', selectedCam.label);
+      
+      // 4. 确保 DOM 元素存在
+      const qrReaderElement = document.getElementById('qr-reader');
+      if (!qrReaderElement) {
+        throw new Error('扫码容器未找到');
+      }
+      qrReaderElement.innerHTML = '';
+      
+      // 5. 启动扫描器
       const scanner = new Html5Qrcode('qr-reader');
       scannerRef.current = scanner;
 
@@ -151,12 +195,9 @@ export default function ReceiveFilePage() {
         qrbox: { width: 250, height: 250 },
         aspectRatio: 1.0,
       };
-
-      // 使用 selectedCamera 或默认后置
-      const cameraId = selectedCamera || 'environment';
       
       await scanner.start(
-        cameraId,
+        selectedCam.id,
         config,
         handleScanSuccess,
         (error) => {
@@ -167,6 +208,7 @@ export default function ReceiveFilePage() {
       setIsScanning(true);
       setCameraPermission('granted');
       setErrorMessage(null);
+      console.log('✅ 扫描器已启动');
     } catch (err: any) {
       console.error('启动扫描仪失败:', err);
       setCameraPermission('denied');
