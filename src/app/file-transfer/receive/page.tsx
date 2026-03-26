@@ -32,7 +32,6 @@ export default function ReceiveFilePage() {
   const [avgSpeed, setAvgSpeed] = useState<number>(0); // 平均速度 (kB/s)
   const [currentSpeed, setCurrentSpeed] = useState<number>(0); // 当前速度 (kB/s)
   const startTimeRef = useRef<number>(0);
-  const lastScanTimeRef = useRef<number>(0);
   const scanCountRef = useRef<number>(0);
   
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -104,11 +103,20 @@ export default function ReceiveFilePage() {
     // 更新接收统计（估算字节数：每片约 1800 字符，Base64 解码后约 1350 字节）
     const newReceivedBytes = receivedBytes + Math.round(chunk.data.length * 0.75);
     setReceivedBytes(newReceivedBytes);
+    
+    // 实时更新速度统计
     if (elapsed > 0) {
-      setCurrentSpeed(newReceivedBytes / elapsed / 1024); // kB/s
+      const avg = newReceivedBytes / elapsed / 1024;
+      setAvgSpeed(avg);
+      
+      // 计算瞬时速度（基于最近一次扫描）
+      const timeSinceLastScan = now - lastScanTimeRef.current;
+      if (timeSinceLastScan > 0 && timeSinceLastScan < 1000) {
+        setCurrentSpeed(Math.round(chunk.data.length * 0.75) / (timeSinceLastScan / 1000) / 1024);
+      }
     }
     
-    console.log(`收到分片 ${chunk.index + 1}/${chunk.total}`);
+    console.log(`收到分片 ${chunk.index + 1}/${chunk.total}, 已接收：${formatFileSize(newReceivedBytes)}`);
 
   }, [receivedBytes]);
 
@@ -401,38 +409,64 @@ export default function ReceiveFilePage() {
           )}
         </div>
 
-        {/* Real-time Stats Bar (类似 QRSS) */}
-        {isScanning && (
-          <div className="bg-gray-900 text-white rounded-lg p-3 mb-6 font-mono text-sm">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="text-green-400">
+        {/* Real-time Stats Bar (类似 QRSS) - 扫描时始终显示 */}
+        {(isScanning || chunks.length > 0) && (
+          <div className="bg-gray-900 text-white rounded-lg p-4 mb-6 font-mono text-sm shadow-lg">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              {/* 左侧：进度 */}
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <span className="text-green-400 font-bold text-base">
                   {formatFileSize(receivedBytes)}
                 </span>
-                {fileMeta && (
+                {fileMeta ? (
                   <>
                     <span className="text-gray-500">/</span>
-                    <span>{formatFileSize(fileMeta.fileSize)}</span>
+                    <span className="text-gray-300">{formatFileSize(fileMeta.fileSize)}</span>
                     <span className="text-gray-500">
                       ({Math.round((receivedBytes / fileMeta.fileSize) * 100)}%)
                     </span>
                   </>
-                )}
-              </div>
-              <div className="flex items-center gap-4 text-xs">
-                <span className="text-blue-400">
-                  {scanRate.toFixed(1)} Hz
-                </span>
-                <span className="text-yellow-400">
-                  {currentSpeed.toFixed(2)} kB/s
-                </span>
-                {avgSpeed > 0 && (
-                  <span className="text-gray-400">
-                    ({avgSpeed.toFixed(2)} kB/s)
+                ) : (
+                  <span className="text-gray-400 text-xs">
+                    (等待文件信息...)
                   </span>
                 )}
               </div>
+              
+              {/* 右侧：性能指标 */}
+              <div className="flex items-center gap-4 text-xs flex-shrink-0">
+                <div className="text-center">
+                  <div className="text-blue-400 font-bold">{scanRate.toFixed(1)} Hz</div>
+                  <div className="text-gray-500 text-[10px]">扫描速率</div>
+                </div>
+                <div className="w-px h-6 bg-gray-700"></div>
+                <div className="text-center">
+                  <div className="text-yellow-400 font-bold">{currentSpeed.toFixed(2)} kB/s</div>
+                  <div className="text-gray-500 text-[10px]">当前速度</div>
+                </div>
+                {avgSpeed > 0 && (
+                  <>
+                    <div className="w-px h-6 bg-gray-700"></div>
+                    <div className="text-center">
+                      <div className="text-gray-400 font-bold">{avgSpeed.toFixed(2)} kB/s</div>
+                      <div className="text-gray-500 text-[10px]">平均速度</div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
+            
+            {/* 进度条 */}
+            {fileMeta && (
+              <div className="mt-3">
+                <div className="w-full bg-gray-700 rounded-full h-2">
+                  <div
+                    className="bg-gradient-to-r from-green-500 to-green-400 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min((receivedBytes / fileMeta.fileSize) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
