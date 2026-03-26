@@ -73,21 +73,26 @@ export default function ReceiveFilePage() {
     
     console.log('✅ 解析成功，数据类型:', 'type' in data ? data.type : 'chunk');
 
-    // 处理结束标识
-    if ('type' in data && data.type === 'end') {
-      setEndMarker(data);
-      setIsScanning(false);
-      stopScanner();
-      return;
-    }
-
-    // 处理文件元数据
+    // 处理文件元数据（优先处理）
     if ('type' in data && data.type === 'file-meta') {
       setFileMeta(data);
       setFileName(data.fileName);
       setFileSize(data.fileSize);
       setMimeType(data.mimeType);
-      console.log('收到文件元数据:', data.fileName);
+      console.log('✅ 收到文件元数据:', data.fileName);
+      return;
+    }
+
+    // 处理结束标识
+    if ('type' in data && data.type === 'end') {
+      setEndMarker(data);
+      // 如果已经收到元数据和所有分片，停止扫描
+      if (fileMeta && chunks.length >= fileMeta.totalChunks) {
+        setIsScanning(false);
+        stopScanner();
+      } else {
+        console.log('⏳ 收到结束标识，但数据不完整，继续等待...');
+      }
       return;
     }
 

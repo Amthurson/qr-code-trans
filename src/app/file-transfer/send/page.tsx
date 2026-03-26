@@ -74,10 +74,11 @@ export default function SendFilePage() {
       // 创建结束标识
       const endMarker = createEndMarker(metaChunk.fileId);
       
-      // 合并所有分片：数据分片 + 元数据分片 + 结束标识
+      // 合并所有分片：元数据 + 数据分片 + 结束标识
+      // 元数据放在最前面，这样新加入的接收端第一轮就能收到
       const allChunks = [
-        ...dataChunks,
         metaChunk,
+        ...dataChunks,
         endMarker,
       ];
       
