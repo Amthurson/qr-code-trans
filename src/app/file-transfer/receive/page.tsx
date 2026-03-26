@@ -83,19 +83,11 @@ export default function ReceiveFilePage() {
       return;
     }
 
-    // 处理结束标识（只记录，不停止）
+    // 处理结束标识（只记录，完全不停止）
     if ('type' in data && data.type === 'end') {
       setEndMarker(data);
-      console.log('🏁 收到结束标识，检查数据完整性...');
-      
-      // 如果已经收满所有分片，自动停止
-      if (fileMeta && chunks.length >= fileMeta.totalChunks) {
-        console.log('✅ 数据已完整，停止扫描并关闭摄像头');
-        setIsScanning(false);
-        stopScanner();
-      } else {
-        console.log(`⏳ 数据不完整 (${chunks.length}/${fileMeta?.totalChunks || '?'})，继续等待下一轮...`);
-      }
+      console.log('🏁 收到结束标识，继续循环扫描...');
+      // 完全不停止，继续接收
       return;
     }
 
@@ -113,14 +105,6 @@ export default function ReceiveFilePage() {
     
     if (isDuplicate) {
       console.log('⏭️  重复分片，跳过:', chunk.index);
-      
-      // 检查是否已经收满
-      if (fileMeta && chunks.length >= fileMeta.totalChunks) {
-        console.log('✅ 数据已收满，停止扫描并关闭摄像头');
-        setIsScanning(false);
-        // 延迟关闭，让用户看到完成状态
-        setTimeout(() => stopScanner(), 500);
-      }
     } else {
       // 添加分片
       chunkSetRef.current.add(chunk.index);
@@ -131,14 +115,12 @@ export default function ReceiveFilePage() {
       setReceivedBytes(newReceivedBytes);
       
       console.log(`✅ 收到分片 ${chunk.index + 1}/${chunk.total}, 已接收：${formatFileSize(newReceivedBytes)}`);
-      
-      // 检查是否已经收满
-      if (fileMeta && chunkSetRef.current.size >= fileMeta.totalChunks) {
-        console.log('✅ 所有分片已收满，停止扫描并关闭摄像头');
-        setIsScanning(false);
-        // 延迟关闭，让用户看到完成状态
-        setTimeout(() => stopScanner(), 500);
-      }
+    }
+    
+    // 检查是否可以重组（但不自动停止）
+    if (fileMeta && chunkSetRef.current.size >= fileMeta.totalChunks && !downloadUrl) {
+      console.log('✅ 所有分片已收满，可以点击"重组文件"下载');
+      // 不自动停止，让用户手动控制
     }
     
   }, [receivedBytes]);
@@ -508,6 +490,16 @@ export default function ReceiveFilePage() {
                   <p className="text-sm text-blue-600 mt-1">
                     请将手机对准发送端的二维码，保持设备稳定
                   </p>
+                  {fileMeta && chunkSetRef.current.size >= fileMeta.totalChunks && (
+                    <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <p className="text-green-800 font-semibold text-sm">
+                        ✅ 所有分片已收满！
+                      </p>
+                      <p className="text-xs text-green-600 mt-1">
+                        可以继续扫描确保完整，或点击"停止扫描"手动停止
+                      </p>
+                    </div>
+                  )}
                   {chunks.length > 0 && !fileMeta && (
                     <p className="text-xs text-blue-500 mt-2">
                       💡 提示：如果长时间未收到文件信息，可能是漏扫了前面的分片，请继续等待下一轮循环
