@@ -26,6 +26,8 @@ export default function SendFilePage() {
   
   const transmissionTimer = useRef<NodeJS.Timeout | null>(null);
   const autoAdvanceRef = useRef(true);
+  const [fps, setFps] = useState(2); // 默认 2 FPS，可调整
+  const [loopCount, setLoopCount] = useState(0); // 循环次数
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -121,20 +123,35 @@ export default function SendFilePage() {
       });
       setQrDataUrl(qrDataUrl);
       setProgress(((nextIndex + 1) / chunks.length) * 100);
-    } else {
-      // 传输完成
-      handleStopTransmission();
     }
-  }, [currentChunkIndex, chunks, handleStopTransmission]);
+  }, [currentChunkIndex, chunks]);
 
-  // 自动切换分片
+  // 自动切换分片（支持循环播放）
   React.useEffect(() => {
-    if (isTransmitting && currentChunkIndex < chunks.length - 1) {
+    if (isTransmitting) {
+      const interval = Math.round(1000 / fps); // 根据 FPS 计算间隔
+      
       transmissionTimer.current = setInterval(() => {
         if (autoAdvanceRef.current) {
-          handleNextChunk();
+          if (currentChunkIndex < chunks.length - 1) {
+            handleNextChunk();
+          } else {
+            // 到达最后一个分片，循环回第一个
+            setCurrentChunkIndex(0);
+            setLoopCount(prev => prev + 1);
+            
+            // 重新生成第一个二维码
+            const qrData = encodeQRData(chunks[0]);
+            QRCode.toDataURL(qrData, {
+              width: 400,
+              margin: 2,
+              errorCorrectionLevel: 'M',
+            }).then(setQrDataUrl);
+            
+            setProgress(0);
+          }
         }
-      }, 2000); // 每 2 秒切换一个二维码
+      }, interval);
     }
 
     return () => {
@@ -142,7 +159,7 @@ export default function SendFilePage() {
         clearInterval(transmissionTimer.current);
       }
     };
-  }, [isTransmitting, currentChunkIndex, chunks.length, handleNextChunk]);
+  }, [isTransmitting, currentChunkIndex, chunks.length, chunks, fps, handleNextChunk]);
 
   const estimatedChunks = file ? estimateChunks(file.size) : 0;
 
@@ -239,10 +256,43 @@ export default function SendFilePage() {
               3️⃣ 展示二维码
             </h2>
 
+            {/* FPS Control */}
+            <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-semibold text-gray-700">
+                  ⚡ 刷新率 (FPS)
+                </label>
+                <span className="text-sm font-bold text-indigo-600">
+                  {fps} FPS
+                </span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="10"
+                step="1"
+                value={fps}
+                onChange={(e) => setFps(Number(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                disabled={isTransmitting}
+              />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>1 FPS (稳定)</span>
+                <span>10 FPS (快速)</span>
+              </div>
+            </div>
+
             {/* Progress Bar */}
             <div className="mb-6">
               <div className="flex justify-between text-sm text-gray-600 mb-2">
-                <span>进度：{currentChunkIndex + 1} / {chunks.length}</span>
+                <span>
+                  进度：{currentChunkIndex + 1} / {chunks.length}
+                  {loopCount > 0 && (
+                    <span className="ml-2 text-green-600">
+                      (第 {loopCount + 1} 轮)
+                    </span>
+                  )}
+                </span>
                 <span>{progress.toFixed(0)}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-3">
@@ -327,13 +377,13 @@ export default function SendFilePage() {
             </div>
 
             {/* Completion Message */}
-            {currentChunkIndex >= chunks.length - 1 && (
+            {loopCount > 0 && (
               <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg text-center">
                 <p className="text-green-800 font-semibold">
-                  ✅ 传输完成！
+                  🔄 循环播放中 (第 {loopCount + 1} 轮)
                 </p>
                 <p className="text-sm text-green-600 mt-1">
-                  共传输 {chunks.length} 个二维码
+                  接收端可以中途加入扫描，无需等待从头开始
                 </p>
               </div>
             )}
@@ -346,9 +396,9 @@ export default function SendFilePage() {
           <ol className="space-y-2 text-sm text-gray-600">
             <li>1. 选择要传输的文件（支持任意类型）</li>
             <li>2. 点击"生成二维码序列"，系统会自动分片并编码</li>
-            <li>3. 点击"开始传输"，二维码会自动切换（每 2 秒一个）</li>
-            <li>4. 接收端使用摄像头连续扫描即可</li>
-            <li>5. 传输完成后，接收端会自动重组文件</li>
+            <li>3. 调节 FPS（推荐 2-5 FPS，根据设备性能）</li>
+            <li>4. 点击"开始传输"，二维码会循环播放</li>
+            <li>5. 接收端使用摄像头连续扫描即可（支持中途加入）</li>
           </ol>
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-800">

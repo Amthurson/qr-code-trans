@@ -302,6 +302,11 @@ export default function ReceiveFilePage() {
                   <p className="text-sm text-blue-600 mt-1">
                     请将手机对准发送端的二维码，保持设备稳定
                   </p>
+                  {chunks.length > 0 && !fileMeta && (
+                    <p className="text-xs text-blue-500 mt-2">
+                      💡 提示：如果长时间未收到文件信息，可能是漏扫了前面的分片，请继续等待下一轮循环
+                    </p>
+                  )}
                 </div>
               )}
             </div>
