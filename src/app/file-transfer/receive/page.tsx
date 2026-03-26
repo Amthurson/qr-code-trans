@@ -50,6 +50,8 @@ export default function ReceiveFilePage() {
     }
     lastScanTimeRef.current = now;
 
+    console.log('📡 扫描到数据:', decodedText.substring(0, 50) + '...');
+
     // 更新扫描统计
     scanCountRef.current += 1;
     const elapsed = (now - startTimeRef.current) / 1000; // 秒
@@ -61,7 +63,7 @@ export default function ReceiveFilePage() {
     const data = decodeQRData(decodedText);
     
     if (!data) {
-      console.log('无效的 QR 数据格式');
+      console.warn('⚠️ 无效的 QR 数据格式:', decodedText.substring(0, 100));
       return;
     }
 
@@ -201,14 +203,22 @@ export default function ReceiveFilePage() {
         config,
         handleScanSuccess,
         (error) => {
-          // 扫描错误通常是因为没有检测到二维码，可以忽略
+          // 记录扫描错误，便于调试
+          console.warn('⚠️ 扫描错误:', error);
         }
       );
 
       setIsScanning(true);
       setCameraPermission('granted');
       setErrorMessage(null);
-      console.log('✅ 扫描器已启动');
+      console.log('✅ 扫描器已启动，持续扫描中...');
+      
+      // 监听扫描器状态变化
+      setTimeout(() => {
+        if (scannerRef.current && !isScanning) {
+          console.log('⚠️ 扫描器似乎已停止，尝试重启...');
+        }
+      }, 5000);
     } catch (err: any) {
       console.error('启动扫描仪失败:', err);
       setCameraPermission('denied');
@@ -327,6 +337,12 @@ export default function ReceiveFilePage() {
           <p className="text-gray-600">
             开启摄像头 → 连续扫描二维码 → 自动重组文件
           </p>
+          <button
+            onClick={() => setDebugMode(!debugMode)}
+            className="mt-4 text-xs text-gray-400 hover:text-gray-600 underline"
+          >
+            {debugMode ? '隐藏调试信息' : '显示调试信息'}
+          </button>
         </div>
 
         {/* HTTPS Warning */}
@@ -479,6 +495,20 @@ export default function ReceiveFilePage() {
             </div>
           )}
         </div>
+
+        {/* Debug Panel */}
+        {debugMode && (
+          <div className="bg-gray-800 text-green-400 rounded-lg p-4 mb-6 font-mono text-xs shadow-lg">
+            <h3 className="font-bold mb-2">🔍 调试信息</h3>
+            <div className="space-y-1">
+              <p>扫描状态：{isScanning ? '✅ 扫描中' : '⏸️ 已暂停'}</p>
+              <p>已接收分片：{chunks.length} 个</p>
+              <p>分片索引：{[...chunkSetRef.current].sort((a,b) => a-b).join(', ') || '无'}</p>
+              <p>文件元数据：{fileMeta ? `✅ ${fileMeta.fileName}` : '❌ 未收到'}</p>
+              <p>结束标识：{endMarker ? '✅ 已收到' : '❌ 未收到'}</p>
+            </div>
+          </div>
+        )}
 
         {/* Real-time Stats Bar (类似 QRSS) - 扫描时始终显示 */}
         {(isScanning || chunks.length > 0) && (
