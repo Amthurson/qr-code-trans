@@ -84,9 +84,9 @@ export default function SendFilePage() {
       // 生成第一个二维码
       const qrData = encodeQRData(allChunks[0]);
       const qrDataUrl = await QRCode.toDataURL(qrData, {
-        width: 400,
-        margin: 2,
-        errorCorrectionLevel: 'M',
+        width: 500,  // 增大尺寸
+        margin: 3,
+        errorCorrectionLevel: 'H',  // 最高纠错级别
       });
       setQrDataUrl(qrDataUrl);
       
@@ -118,9 +118,9 @@ export default function SendFilePage() {
       
       const qrData = encodeQRData(chunks[nextIndex]);
       const qrDataUrl = await QRCode.toDataURL(qrData, {
-        width: 400,
-        margin: 2,
-        errorCorrectionLevel: 'M',
+        width: 500,  // 增大尺寸
+        margin: 3,
+        errorCorrectionLevel: 'H',  // 最高纠错级别
       });
       setQrDataUrl(qrDataUrl);
       setProgress(((nextIndex + 1) / chunks.length) * 100);
@@ -144,12 +144,17 @@ export default function SendFilePage() {
             // 重新生成第一个二维码
             const qrData = encodeQRData(chunks[0]);
             QRCode.toDataURL(qrData, {
-              width: 400,
-              margin: 2,
-              errorCorrectionLevel: 'M',
+              width: 500,  // 增大尺寸
+              margin: 3,
+              errorCorrectionLevel: 'H',  // 最高纠错级别
             }).then(setQrDataUrl);
             
             setProgress(0);
+            
+            // 第一轮结束后，自动降低 FPS 便于扫描
+            if (loopCount === 0 && fps > 3) {
+              setFps(3);  // 第二轮开始降到 3 FPS
+            }
           }
         }
       }, interval);
