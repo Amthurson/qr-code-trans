@@ -188,7 +188,7 @@ export default function ReceiveFilePage() {
       }
       qrReaderElement.innerHTML = '';
       
-      // 5. 启动扫描器
+      // 5. 启动扫描器（使用 config 方式，更兼容移动端）
       const scanner = new Html5Qrcode('qr-reader');
       scannerRef.current = scanner;
 
@@ -196,14 +196,15 @@ export default function ReceiveFilePage() {
         fps: 10,
         qrbox: { width: 250, height: 250 },
         aspectRatio: 1.0,
+        disableFlip: false,
       };
       
+      // 使用 config 方式启动（更兼容移动端）
       await scanner.start(
-        selectedCam.id,
+        { facingMode: selectedCamera === 'user' ? 'user' : 'environment' },
         config,
         handleScanSuccess,
         (error) => {
-          // 记录扫描错误，便于调试
           console.warn('⚠️ 扫描错误:', error);
         }
       );
@@ -461,10 +462,10 @@ export default function ReceiveFilePage() {
               {/* 摄像头容器 */}
               <div 
                 ref={videoContainerRef}
-                className="w-full bg-black rounded-lg overflow-hidden mb-4"
-                style={{ minHeight: '300px' }}
+                className="w-full bg-black rounded-lg overflow-hidden mb-4 relative"
+                style={{ minHeight: '300px', minWidth: '300px' }}
               >
-                <div id="qr-reader" className="w-full" />
+                <div id="qr-reader" className="w-full h-full" style={{ minHeight: '300px' }} />
               </div>
               
               <div className="flex gap-4">
