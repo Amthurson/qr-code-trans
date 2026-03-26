@@ -149,6 +149,7 @@ export default function ReceiveFilePage() {
       }));
       
       setAvailableCameras(cameras);
+      setCameraPermission('granted');
       
       // 默认选择后置摄像头
       if (cameras.length > 0) {
@@ -157,13 +158,21 @@ export default function ReceiveFilePage() {
       }
     } catch (err) {
       console.error('获取摄像头列表失败:', err);
+      setCameraPermission('denied');
     }
   }, []);
 
   const startScanner = useCallback(async () => {
     // 先获取摄像头列表（如果是第一次）
-    if (availableCameras.length === 0) {
+    if (availableCameras.length === 0 && cameraPermission !== 'denied') {
       await getAvailableCameras();
+      
+      // 如果获取摄像头列表时权限被拒绝，直接返回
+      if (cameraPermission === 'denied' && availableCameras.length === 0) {
+        setErrorMessage('无法访问摄像头：请确保已授予摄像头权限，然后刷新页面重试');
+        setScanStatus('error');
+        return;
+      }
     }
 
     // 请求摄像头权限
@@ -182,7 +191,7 @@ export default function ReceiveFilePage() {
     } catch (err) {
       console.error('摄像头权限被拒绝:', err);
       setCameraPermission('denied');
-      setErrorMessage('无法访问摄像头：请确保已授予摄像头权限');
+      setErrorMessage('无法访问摄像头：请确保已授予摄像头权限，然后刷新页面重试');
       setScanStatus('error');
       return;
     }
@@ -323,7 +332,22 @@ export default function ReceiveFilePage() {
         {/* Error Display */}
         {errorMessage && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-6">
-            ❌ {errorMessage}
+            <p className="font-semibold mb-2">❌ {errorMessage}</p>
+            <div className="text-sm mt-3 space-y-1">
+              <p><strong>解决方法：</strong></p>
+              <ol className="list-decimal list-inside space-y-1 ml-2">
+                <li>点击浏览器地址栏左侧的 🔒 图标</li>
+                <li>找到"摄像头"权限</li>
+                <li>切换为"允许"</li>
+                <li>刷新页面</li>
+              </ol>
+            </div>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+            >
+              🔄 刷新页面
+            </button>
           </div>
         )}
 
@@ -359,19 +383,36 @@ export default function ReceiveFilePage() {
 
           {!isScanning && scanStatus !== 'scanning' ? (
             <div className="text-center">
-              <button
-                onClick={handleStartScan}
-                className="py-3 px-8 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center gap-2 mx-auto"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                开启摄像头扫描
-              </button>
-              <p className="text-sm text-gray-500 mt-3">
-                首次使用需要授予摄像头权限
-              </p>
+              {cameraPermission === 'denied' ? (
+                <div className="space-y-4">
+                  <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
+                    <p className="font-semibold mb-2">⚠️ 摄像头权限被拒绝</p>
+                    <p>请点击下方按钮刷新页面，然后允许摄像头权限</p>
+                  </div>
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="py-3 px-8 bg-yellow-600 text-white rounded-lg font-semibold hover:bg-yellow-700 transition-colors"
+                  >
+                    🔄 刷新页面
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={handleStartScan}
+                    className="py-3 px-8 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center gap-2 mx-auto"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    开启摄像头扫描
+                  </button>
+                  <p className="text-sm text-gray-500 mt-3">
+                    首次使用会请求摄像头权限，请点击"允许"
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div>
