@@ -23,11 +23,11 @@ export default function SendFilePage() {
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
-  const [chunkSize, setChunkSize] = useState(400); // 每片字符数，默认 400（非常稀疏）
+  const [chunkSize, setChunkSize] = useState(100); // 每片字符数，默认 100（统一密度）
   
   const transmissionTimer = useRef<NodeJS.Timeout | null>(null);
   const autoAdvanceRef = useRef(true);
-  const [fps, setFps] = useState(2); // 默认 2 FPS，可调整
+  const [fps, setFps] = useState(10); // 默认 10 FPS，支持快速扫描
   const [loopCount, setLoopCount] = useState(0); // 循环次数
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,10 +40,8 @@ export default function SendFilePage() {
       setQrDataUrl(null);
       setFileMeta(null);
       
-      // 自动设置推荐的分片大小（非常保守，确保可扫描）
-      const recommended = selectedFile.size < 50 * 1024 ? 400   // <50KB: 400 字符
-        : selectedFile.size < 500 * 1024 ? 600  // 50KB-500KB: 600 字符
-        : 800;  // >500KB: 800 字符
+      // 自动设置推荐的分片大小（统一密度，100 字符/片）
+      const recommended = 100;  // 统一 100 字符，确保所有二维码密度一致
       setChunkSize(recommended);
     }
   }, []);
@@ -268,19 +266,19 @@ export default function SendFilePage() {
                 </div>
                 <input
                   type="range"
-                  min="200"
-                  max="1200"
+                  min="50"
+                  max="500"
                   step="50"
                   value={chunkSize}
                   onChange={(e) => setChunkSize(Number(e.target.value))}
                   className="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer"
                 />
                 <div className="flex justify-between text-xs text-indigo-600 mt-1">
-                  <span>200 (多片)</span>
-                  <span>1200 (少片)</span>
+                  <span>50 (超多片)</span>
+                  <span>500 (少片)</span>
                 </div>
                 <p className="text-xs text-indigo-700 mt-2">
-                  💡 建议范围：400-600 字符。小文件建议 200-400 字符，二维码非常稀疏，手机秒扫。
+                  💡 推荐：100 字符/片。所有二维码密度统一，扫描器更容易适应，支持高速扫描。
                 </p>
               </div>
 
@@ -337,7 +335,7 @@ export default function SendFilePage() {
               <input
                 type="range"
                 min="1"
-                max="10"
+                max="20"
                 step="1"
                 value={fps}
                 onChange={(e) => setFps(Number(e.target.value))}
@@ -345,8 +343,8 @@ export default function SendFilePage() {
                 disabled={isTransmitting}
               />
               <div className="flex justify-between text-xs text-gray-500 mt-1">
-                <span>1 FPS (稳定)</span>
-                <span>10 FPS (快速)</span>
+                <span>1 FPS (慢速)</span>
+                <span>20 FPS (超快)</span>
               </div>
             </div>
 
@@ -463,18 +461,18 @@ export default function SendFilePage() {
           <h3 className="font-semibold text-gray-700 mb-3">📖 使用说明</h3>
           <ol className="space-y-2 text-sm text-gray-600">
             <li>1. 选择要传输的文件（支持任意类型）</li>
-            <li>2. 调节分片大小（文件大时调大，减少二维码数量）</li>
+            <li>2. 使用推荐的分片大小（100 字符/片，密度统一）</li>
             <li>3. 点击"生成二维码序列"，系统会自动分片并编码</li>
-            <li>4. 调节 FPS（推荐 2-5 FPS，根据设备性能）</li>
+            <li>4. 调节 FPS（推荐 10-20 FPS，高速扫描）</li>
             <li>5. 点击"开始传输"，二维码会循环播放</li>
             <li>6. 接收端使用摄像头连续扫描即可（支持中途加入）</li>
           </ol>
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-800">
               💡 <strong>分片大小建议：</strong>
-              <br/>• 小文件（&lt;100KB）：200-400 字符（二维码非常稀疏，手机秒扫）
-              <br/>• 中文件（100KB-1MB）：400-800 字符
-              <br/>• 大文件（&gt;1MB）：800-1200 字符（需要更多二维码）
+              <br/>• <strong>推荐：100 字符/片</strong>（所有二维码密度统一，易于扫描）
+              <br/>• 小文件：50-150 字符（超稀疏，可高速扫描）
+              <br/>• 大文件：150-300 字符（减少二维码总数）
             </p>
           </div>
         </div>
