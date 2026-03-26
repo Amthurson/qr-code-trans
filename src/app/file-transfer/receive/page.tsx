@@ -25,6 +25,15 @@ export default function ReceiveFilePage() {
   const [fileSize, setFileSize] = useState<number>(0);
   const [mimeType, setMimeType] = useState<string>('');
   const [cameraPermission, setCameraPermission] = useState<'pending' | 'granted' | 'denied'>('pending');
+  const [selectedCamera, setSelectedCamera] = useState<string>('environment'); // 'user' | 'environment'
+  const [availableCameras, setAvailableCameras] = useState<{id: string, label: string}[]>([]);
+  const [scanRate, setScanRate] = useState<number>(0); // 实时扫描速率 (Hz)
+  const [receivedBytes, setReceivedBytes] = useState<number>(0); // 已接收字节数
+  const [avgSpeed, setAvgSpeed] = useState<number>(0); // 平均速度 (kB/s)
+  const [currentSpeed, setCurrentSpeed] = useState<number>(0); // 当前速度 (kB/s)
+  const startTimeRef = useRef<number>(0);
+  const lastScanTimeRef = useRef<number>(0);
+  const scanCountRef = useRef<number>(0);
   
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const chunkSetRef = useRef<Set<number>>(new Set());
@@ -32,12 +41,21 @@ export default function ReceiveFilePage() {
   const videoContainerRef = useRef<HTMLDivElement>(null);
 
   const handleScanSuccess = useCallback(async (decodedText: string) => {
-    // 防抖：避免重复扫描同一个二维码
     const now = Date.now();
-    if (now - lastScanTimeRef.current < 500) {
+    
+    // 防抖：避免重复扫描同一个二维码
+    if (now - lastScanTimeRef.current < 300) {
       return;
     }
     lastScanTimeRef.current = now;
+
+    // 更新扫描统计
+    scanCountRef.current += 1;
+    const elapsed = (now - startTimeRef.current) / 1000; // 秒
+    if (elapsed > 0) {
+      setScanRate(scanCountRef.current / elapsed);
+      setAvgSpeed(receivedBytes / elapsed / 1024); // kB/s
+    }
 
     const data = decodeQRData(decodedText);
     
@@ -82,9 +100,17 @@ export default function ReceiveFilePage() {
     // 添加分片
     chunkSetRef.current.add(chunk.index);
     setChunks(prev => [...prev, chunk]);
+    
+    // 更新接收统计（估算字节数：每片约 1800 字符，Base64 解码后约 1350 字节）
+    const newReceivedBytes = receivedBytes + Math.round(chunk.data.length * 0.75);
+    setReceivedBytes(newReceivedBytes);
+    if (elapsed > 0) {
+      setCurrentSpeed(newReceivedBytes / elapsed / 1024); // kB/s
+    }
+    
     console.log(`收到分片 ${chunk.index + 1}/${chunk.total}`);
 
-  }, []);
+  }, [receivedBytes]);
 
   const stopScanner = useCallback(async () => {
     if (scannerRef.current) {
@@ -99,11 +125,43 @@ export default function ReceiveFilePage() {
     setIsScanning(false);
   }, []);
 
+  const getAvailableCameras = useCallback(async () => {
+    try {
+      // 先请求权限获取设备列表
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      
+      // 停止流
+      stream.getTracks().forEach(track => track.stop());
+      
+      const cameras = videoDevices.map((device, index) => ({
+        id: device.deviceId || (index === 0 ? 'user' : 'environment'),
+        label: device.label || `Camera ${index + 1}`,
+      }));
+      
+      setAvailableCameras(cameras);
+      
+      // 默认选择后置摄像头
+      if (cameras.length > 0) {
+        const envCamera = cameras.find(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('environment'));
+        setSelectedCamera(envCamera?.id || 'environment');
+      }
+    } catch (err) {
+      console.error('获取摄像头列表失败:', err);
+    }
+  }, []);
+
   const startScanner = useCallback(async () => {
-    // 先请求摄像头权限
+    // 先获取摄像头列表（如果是第一次）
+    if (availableCameras.length === 0) {
+      await getAvailableCameras();
+    }
+
+    // 请求摄像头权限
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
+        video: { deviceId: selectedCamera ? { exact: selectedCamera } : { facingMode: 'environment' } }
       });
       
       // 权限授予，停止流（稍后由 html5-qrcode 重新打开）
@@ -157,6 +215,12 @@ export default function ReceiveFilePage() {
     setDownloadUrl(null);
     chunkSetRef.current.clear();
     setErrorMessage(null);
+    setReceivedBytes(0);
+    setScanRate(0);
+    setAvgSpeed(0);
+    setCurrentSpeed(0);
+    scanCountRef.current = 0;
+    startTimeRef.current = Date.now();
     startScanner();
   }, [startScanner]);
 
@@ -257,6 +321,30 @@ export default function ReceiveFilePage() {
             1️⃣ 扫描二维码
           </h2>
 
+          {/* Camera Selection */}
+          {!isScanning && availableCameras.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                📷 选择摄像头
+              </label>
+              <div className="flex gap-2 flex-wrap">
+                {availableCameras.map((camera) => (
+                  <button
+                    key={camera.id}
+                    onClick={() => setSelectedCamera(camera.id)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      selectedCamera === camera.id
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {camera.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {!isScanning && scanStatus !== 'scanning' ? (
             <div className="text-center">
               <button
@@ -313,6 +401,41 @@ export default function ReceiveFilePage() {
           )}
         </div>
 
+        {/* Real-time Stats Bar (类似 QRSS) */}
+        {isScanning && (
+          <div className="bg-gray-900 text-white rounded-lg p-3 mb-6 font-mono text-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="text-green-400">
+                  {formatFileSize(receivedBytes)}
+                </span>
+                {fileMeta && (
+                  <>
+                    <span className="text-gray-500">/</span>
+                    <span>{formatFileSize(fileMeta.fileSize)}</span>
+                    <span className="text-gray-500">
+                      ({Math.round((receivedBytes / fileMeta.fileSize) * 100)}%)
+                    </span>
+                  </>
+                )}
+              </div>
+              <div className="flex items-center gap-4 text-xs">
+                <span className="text-blue-400">
+                  {scanRate.toFixed(1)} Hz
+                </span>
+                <span className="text-yellow-400">
+                  {currentSpeed.toFixed(2)} kB/s
+                </span>
+                {avgSpeed > 0 && (
+                  <span className="text-gray-400">
+                    ({avgSpeed.toFixed(2)} kB/s)
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Progress */}
         {chunks.length > 0 && (
           <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
@@ -351,9 +474,19 @@ export default function ReceiveFilePage() {
             )}
 
             {!fileMeta && (
-              <p className="text-gray-600">
-                正在接收数据分片...
-              </p>
+              <div className="space-y-2">
+                <p className="text-gray-600">
+                  正在接收数据分片...
+                </p>
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-700">
+                    📡 已接收：<strong>{formatFileSize(receivedBytes)}</strong>
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    扫描速率：{scanRate.toFixed(1)} Hz | 速度：{currentSpeed.toFixed(2)} kB/s
+                  </p>
+                </div>
+              </div>
             )}
           </div>
         )}
