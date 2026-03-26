@@ -23,6 +23,7 @@ export default function SendFilePage() {
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
+  const [chunkSize, setChunkSize] = useState(2500); // 每片字符数，默认 2500
   
   const transmissionTimer = useRef<NodeJS.Timeout | null>(null);
   const autoAdvanceRef = useRef(true);
@@ -54,8 +55,8 @@ export default function SendFilePage() {
       // 计算文件 CRC32
       const fileCrc = crc32(base64);
       
-      // 分片
-      const dataChunks = chunkData(base64, 1800);
+      // 分片（使用设定的分片大小）
+      const dataChunks = chunkData(base64, chunkSize);
       
       // 创建文件元数据（作为最后一个数据分片）
       const metaChunk = createFileMetadata(
@@ -217,14 +218,41 @@ export default function SendFilePage() {
           </div>
 
           {file && !chunks.length && (
-            <div className="mt-4 p-4 bg-yellow-50 rounded-lg">
-              <p className="text-sm text-yellow-800">
-                📊 预估分片数量：<strong>{estimatedChunks + 2}</strong> 个二维码
-                （包含元数据和结束标识）
-              </p>
-              <p className="text-xs text-yellow-600 mt-1">
-                每个二维码约 2 秒，总耗时约 {Math.ceil((estimatedChunks + 2) * 2 / 60)} 分钟
-              </p>
+            <div className="space-y-4">
+              {/* 分片大小调节 */}
+              <div className="p-4 bg-indigo-50 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-semibold text-indigo-900">
+                    📦 分片大小
+                  </label>
+                  <span className="text-sm font-bold text-indigo-600">
+                    {chunkSize} 字符/片
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="500"
+                  max="3500"
+                  step="100"
+                  value={chunkSize}
+                  onChange={(e) => setChunkSize(Number(e.target.value))}
+                  className="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-indigo-600 mt-1">
+                  <span>500 (多片)</span>
+                  <span>3500 (少片)</span>
+                </div>
+              </div>
+
+              <div className="p-4 bg-yellow-50 rounded-lg">
+                <p className="text-sm text-yellow-800">
+                  📊 预估分片数量：<strong>{Math.ceil((estimatedChunks * 1800) / chunkSize) + 2}</strong> 个二维码
+                  （包含元数据和结束标识）
+                </p>
+                <p className="text-xs text-yellow-600 mt-1">
+                  每个二维码约 2 秒，总耗时约 {Math.ceil((Math.ceil((estimatedChunks * 1800) / chunkSize) + 2) * 2 / 60)} 分钟
+                </p>
+              </div>
             </div>
           )}
         </div>
@@ -395,15 +423,18 @@ export default function SendFilePage() {
           <h3 className="font-semibold text-gray-700 mb-3">📖 使用说明</h3>
           <ol className="space-y-2 text-sm text-gray-600">
             <li>1. 选择要传输的文件（支持任意类型）</li>
-            <li>2. 点击"生成二维码序列"，系统会自动分片并编码</li>
-            <li>3. 调节 FPS（推荐 2-5 FPS，根据设备性能）</li>
-            <li>4. 点击"开始传输"，二维码会循环播放</li>
-            <li>5. 接收端使用摄像头连续扫描即可（支持中途加入）</li>
+            <li>2. 调节分片大小（文件大时调大，减少二维码数量）</li>
+            <li>3. 点击"生成二维码序列"，系统会自动分片并编码</li>
+            <li>4. 调节 FPS（推荐 2-5 FPS，根据设备性能）</li>
+            <li>5. 点击"开始传输"，二维码会循环播放</li>
+            <li>6. 接收端使用摄像头连续扫描即可（支持中途加入）</li>
           </ol>
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-800">
-              💡 <strong>提示：</strong> 确保接收端摄像头清晰对准二维码，保持设备稳定。
-              大文件可能需要较长时间，请耐心等待。
+              💡 <strong>分片大小建议：</strong>
+              <br/>• 小文件（&lt;100KB）：1500-2000 字符
+              <br/>• 中文件（100KB-1MB）：2500-3000 字符
+              <br/>• 大文件（&gt;1MB）：3000-3500 字符（二维码会更密集）
             </p>
           </div>
         </div>
