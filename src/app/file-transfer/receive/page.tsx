@@ -24,10 +24,12 @@ export default function ReceiveFilePage() {
   const [fileName, setFileName] = useState<string>('');
   const [fileSize, setFileSize] = useState<number>(0);
   const [mimeType, setMimeType] = useState<string>('');
+  const [cameraPermission, setCameraPermission] = useState<'pending' | 'granted' | 'denied'>('pending');
   
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const chunkSetRef = useRef<Set<number>>(new Set());
   const lastScanTimeRef = useRef<number>(0);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
 
   const handleScanSuccess = useCallback(async (decodedText: string) => {
     // 防抖：避免重复扫描同一个二维码
@@ -84,11 +86,39 @@ export default function ReceiveFilePage() {
 
   }, []);
 
-  const startScanner = useCallback(async () => {
+  const stopScanner = useCallback(async () => {
     if (scannerRef.current) {
-      console.log('扫描仪已存在');
+      try {
+        await scannerRef.current.stop();
+        await scannerRef.current.clear();
+        scannerRef.current = null;
+      } catch (err) {
+        console.error('停止扫描仪失败:', err);
+      }
+    }
+    setIsScanning(false);
+  }, []);
+
+  const startScanner = useCallback(async () => {
+    // 先请求摄像头权限
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } 
+      });
+      
+      // 权限授予，停止流（稍后由 html5-qrcode 重新打开）
+      stream.getTracks().forEach(track => track.stop());
+      setCameraPermission('granted');
+    } catch (err) {
+      console.error('摄像头权限被拒绝:', err);
+      setCameraPermission('denied');
+      setErrorMessage('无法访问摄像头：请确保已授予摄像头权限');
+      setScanStatus('error');
       return;
     }
+
+    // 等待 DOM 更新
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     try {
       const scanner = new Html5Qrcode('qr-reader');
@@ -96,18 +126,16 @@ export default function ReceiveFilePage() {
 
       const config = {
         fps: 10,
-        qrbox: { width: 300, height: 300 },
+        qrbox: { width: 250, height: 250 },
         aspectRatio: 1.0,
-        disableFlip: false,
       };
 
       await scanner.start(
-        { facingMode: 'environment' }, // 使用后置摄像头
+        { facingMode: 'environment' },
         config,
         handleScanSuccess,
         (error) => {
           // 扫描错误通常是因为没有检测到二维码，可以忽略
-          // console.log('扫描错误:', error);
         }
       );
 
@@ -121,19 +149,6 @@ export default function ReceiveFilePage() {
     }
   }, [handleScanSuccess]);
 
-  const stopScanner = useCallback(async () => {
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.stop();
-        scannerRef.current.clear();
-        scannerRef.current = null;
-      } catch (err) {
-        console.error('停止扫描仪失败:', err);
-      }
-    }
-    setIsScanning(false);
-  }, []);
-
   const handleStartScan = useCallback(() => {
     // 重置状态
     setChunks([]);
@@ -141,6 +156,7 @@ export default function ReceiveFilePage() {
     setEndMarker(null);
     setDownloadUrl(null);
     chunkSetRef.current.clear();
+    setErrorMessage(null);
     startScanner();
   }, [startScanner]);
 
@@ -228,35 +244,47 @@ export default function ReceiveFilePage() {
           </p>
         </div>
 
+        {/* Error Display */}
+        {errorMessage && (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-6">
+            ❌ {errorMessage}
+          </div>
+        )}
+
         {/* Scanner */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
           <h2 className="text-xl font-semibold text-gray-700 mb-4">
             1️⃣ 扫描二维码
           </h2>
 
-          {!isScanning ? (
+          {!isScanning && scanStatus !== 'scanning' ? (
             <div className="text-center">
-              <div
-                id="qr-reader"
-                className="hidden"
-                style={{ visibility: isScanning ? 'visible' : 'hidden' }}
-              />
-              
               <button
                 onClick={handleStartScan}
-                className="py-3 px-8 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors"
+                className="py-3 px-8 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center gap-2 mx-auto"
               >
-                📷 开启摄像头扫描
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                开启摄像头扫描
               </button>
+              <p className="text-sm text-gray-500 mt-3">
+                首次使用需要授予摄像头权限
+              </p>
             </div>
           ) : (
             <div>
-              <div
-                id="qr-reader"
-                className="w-full max-w-md mx-auto rounded-lg overflow-hidden"
-              />
+              {/* 摄像头容器 */}
+              <div 
+                ref={videoContainerRef}
+                className="w-full bg-black rounded-lg overflow-hidden mb-4"
+                style={{ minHeight: '300px' }}
+              >
+                <div id="qr-reader" className="w-full" />
+              </div>
               
-              <div className="mt-4 flex gap-4">
+              <div className="flex gap-4">
                 <button
                   onClick={handleStopScan}
                   className="flex-1 py-3 px-6 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors"
@@ -264,18 +292,18 @@ export default function ReceiveFilePage() {
                   ⏹️ 停止扫描
                 </button>
               </div>
-            </div>
-          )}
 
-          {/* Status */}
-          {scanStatus === 'scanning' && (
-            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-              <p className="text-blue-800 font-semibold">
-                🔄 正在扫描中...
-              </p>
-              <p className="text-sm text-blue-600 mt-1">
-                请将手机对准发送端的二维码，保持设备稳定
-              </p>
+              {/* Status */}
+              {scanStatus === 'scanning' && (
+                <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                  <p className="text-blue-800 font-semibold flex items-center gap-2">
+                    <span className="animate-pulse">🔄</span> 正在扫描中...
+                  </p>
+                  <p className="text-sm text-blue-600 mt-1">
+                    请将手机对准发送端的二维码，保持设备稳定
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -322,13 +350,6 @@ export default function ReceiveFilePage() {
                 正在接收数据分片...
               </p>
             )}
-          </div>
-        )}
-
-        {/* Error Display */}
-        {errorMessage && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-6">
-            ❌ {errorMessage}
           </div>
         )}
 
@@ -381,8 +402,12 @@ export default function ReceiveFilePage() {
           </ol>
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-800">
-              💡 <strong>提示：</strong> 扫描过程中请保持设备稳定，确保二维码清晰完整。
-              如果扫描失败，可以调整距离和角度。
+              💡 <strong>提示：</strong> 
+              • 扫描过程中请保持设备稳定，确保二维码清晰完整
+              <br/>
+              • 如果扫描失败，可以调整距离和角度（建议 20-30cm）
+              <br/>
+              • 确保环境光线充足
             </p>
           </div>
         </div>
