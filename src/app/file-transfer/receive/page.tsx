@@ -79,7 +79,7 @@ export default function ReceiveFilePage() {
       setFileName(data.fileName);
       setFileSize(data.fileSize);
       setMimeType(data.mimeType);
-      console.log('✅ 收到文件元数据:', data.fileName);
+      console.log('✅ 收到文件元数据:', data.fileName, `总共 ${data.totalChunks} 个分片`);
       return;
     }
 
@@ -104,7 +104,7 @@ export default function ReceiveFilePage() {
     const isDuplicate = chunkSetRef.current.has(chunk.index);
     
     if (isDuplicate) {
-      console.log('⏭️  重复分片，跳过:', chunk.index);
+      console.log(`⏭️  重复分片，跳过：${chunk.index + 1}/${chunk.total}`);
     } else {
       // 添加分片
       chunkSetRef.current.add(chunk.index);
@@ -114,13 +114,7 @@ export default function ReceiveFilePage() {
       const newReceivedBytes = receivedBytes + Math.round(chunk.data.length * 0.75);
       setReceivedBytes(newReceivedBytes);
       
-      console.log(`✅ 收到分片 ${chunk.index + 1}/${chunk.total}, 已接收：${formatFileSize(newReceivedBytes)}`);
-    }
-    
-    // 检查是否可以重组（但不自动停止）
-    if (fileMeta && chunkSetRef.current.size >= fileMeta.totalChunks && !downloadUrl) {
-      console.log('✅ 所有分片已收满，可以点击"重组文件"下载');
-      // 不自动停止，让用户手动控制
+      console.log(`✅ 收到分片 ${chunk.index + 1}/${chunk.total}, 进度：${chunkSetRef.current.size}/${chunk.total}`);
     }
     
   }, [receivedBytes]);
@@ -493,10 +487,10 @@ export default function ReceiveFilePage() {
                   {fileMeta && chunkSetRef.current.size >= fileMeta.totalChunks && (
                     <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
                       <p className="text-green-800 font-semibold text-sm">
-                        ✅ 所有分片已收满！
+                        ✅ 所有分片已收满 ({chunkSetRef.current.size}/{fileMeta.totalChunks})！
                       </p>
                       <p className="text-xs text-green-600 mt-1">
-                        可以继续扫描确保完整，或点击"停止扫描"手动停止
+                        可以点击"停止扫描"，然后点击"重组文件"下载
                       </p>
                     </div>
                   )}
@@ -602,13 +596,13 @@ export default function ReceiveFilePage() {
 
                 <div>
                   <div className="flex justify-between text-sm text-gray-600 mb-2">
-                    <span>已接收分片：{chunks.length} / {fileMeta.totalChunks}</span>
-                    <span>{Math.round((chunks.length / fileMeta.totalChunks) * 100)}%</span>
+                    <span>已接收分片：{chunkSetRef.current.size} / {fileMeta.totalChunks}</span>
+                    <span>{Math.round((chunkSetRef.current.size / fileMeta.totalChunks) * 100)}%</span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-3">
                     <div
                       className="bg-green-600 h-3 rounded-full transition-all duration-300"
-                      style={{ width: `${(chunks.length / fileMeta.totalChunks) * 100}%` }}
+                      style={{ width: `${(chunkSetRef.current.size / fileMeta.totalChunks) * 100}%` }}
                     />
                   </div>
                 </div>
