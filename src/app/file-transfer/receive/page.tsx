@@ -27,12 +27,13 @@ export default function ReceiveFilePage() {
   const [cameraPermission, setCameraPermission] = useState<'pending' | 'granted' | 'denied'>('pending');
   const [selectedCamera, setSelectedCamera] = useState<string>('environment'); // 'user' | 'environment'
   const [scanRate, setScanRate] = useState<number>(0); // 实时扫描速率 (Hz)
-  
-  // 检查是否为 HTTPS 环境
-  const isSecureContext = typeof window !== 'undefined' && (window.location.protocol === 'https:' || window.location.hostname === 'localhost');
+  const [debugMode, setDebugMode] = useState(false); // 调试模式
   const [receivedBytes, setReceivedBytes] = useState<number>(0); // 已接收字节数
   const [avgSpeed, setAvgSpeed] = useState<number>(0); // 平均速度 (kB/s)
   const [currentSpeed, setCurrentSpeed] = useState<number>(0); // 当前速度 (kB/s)
+  
+  // 检查是否为 HTTPS 环境
+  const isSecureContext = typeof window !== 'undefined' && (window.location.protocol === 'https:' || window.location.hostname === 'localhost');
   const startTimeRef = useRef<number>(0);
   const scanCountRef = useRef<number>(0);
   
