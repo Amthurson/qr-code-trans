@@ -27,6 +27,9 @@ export default function ReceiveFilePage() {
   const [cameraPermission, setCameraPermission] = useState<'pending' | 'granted' | 'denied'>('pending');
   const [selectedCamera, setSelectedCamera] = useState<string>('environment'); // 'user' | 'environment'
   const [scanRate, setScanRate] = useState<number>(0); // 实时扫描速率 (Hz)
+  
+  // 检查是否为 HTTPS 环境
+  const isSecureContext = typeof window !== 'undefined' && (window.location.protocol === 'https:' || window.location.hostname === 'localhost');
   const [receivedBytes, setReceivedBytes] = useState<number>(0); // 已接收字节数
   const [avgSpeed, setAvgSpeed] = useState<number>(0); // 平均速度 (kB/s)
   const [currentSpeed, setCurrentSpeed] = useState<number>(0); // 当前速度 (kB/s)
@@ -284,19 +287,38 @@ export default function ReceiveFilePage() {
           </p>
         </div>
 
+        {/* HTTPS Warning */}
+        {!isSecureContext && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg p-4 mb-6">
+            <p className="font-semibold mb-2">⚠️ 当前网站未使用 HTTPS</p>
+            <p className="text-sm">
+              摄像头权限需要 HTTPS 环境才能使用。当前地址：<code className="bg-yellow-100 px-2 py-1 rounded">{typeof window !== 'undefined' ? window.location.href : ''}</code>
+            </p>
+            <p className="text-sm mt-2">
+              <strong>解决方案：</strong>使用 Vercel 部署的 HTTPS 版本，或在本地 localhost 测试
+            </p>
+          </div>
+        )}
+
         {/* Error Display */}
         {errorMessage && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-6">
             <p className="font-semibold mb-2">❌ {errorMessage}</p>
-            <div className="text-sm mt-3 space-y-1">
-              <p><strong>解决方法：</strong></p>
-              <ol className="list-decimal list-inside space-y-1 ml-2">
-                <li>点击浏览器地址栏左侧的 🔒 图标</li>
-                <li>找到"摄像头"权限</li>
-                <li>切换为"允许"</li>
-                <li>刷新页面</li>
-              </ol>
-            </div>
+            {isSecureContext ? (
+              <div className="text-sm mt-3 space-y-1">
+                <p><strong>解决方法：</strong></p>
+                <ol className="list-decimal list-inside space-y-1 ml-2">
+                  <li>点击浏览器地址栏左侧的 🔒 图标</li>
+                  <li>找到"摄像头"权限</li>
+                  <li>切换为"允许"</li>
+                  <li>刷新页面</li>
+                </ol>
+              </div>
+            ) : (
+              <p className="text-sm mt-2">
+                💡 请确保使用 HTTPS 环境访问（如 Vercel 部署地址或 localhost）
+              </p>
+            )}
             <button
               onClick={() => window.location.reload()}
               className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
