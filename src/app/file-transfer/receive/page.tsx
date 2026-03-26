@@ -198,10 +198,11 @@ export default function ReceiveFilePage() {
       scannerRef.current = scanner;
 
       const config = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
+        fps: 5,  // 降低 FPS，给摄像头更多对焦时间
+        qrbox: { width: 300, height: 300 },  // 增大扫描框
         aspectRatio: 1.0,
         disableFlip: false,
+        zoom: 1.0,  // 禁用自动变焦
       };
       
       // 使用 config 方式启动（更兼容移动端）
@@ -213,6 +214,8 @@ export default function ReceiveFilePage() {
           console.warn('⚠️ 扫描错误:', error);
         }
       );
+      
+      console.log('✅ 扫描器配置：FPS=5, QR 框=300x300');
 
       setIsScanning(true);
       setCameraPermission('granted');

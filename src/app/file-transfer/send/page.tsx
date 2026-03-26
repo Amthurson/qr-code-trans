@@ -23,7 +23,7 @@ export default function SendFilePage() {
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
-  const [chunkSize, setChunkSize] = useState(600); // 每片字符数，默认 600（更稀疏）
+  const [chunkSize, setChunkSize] = useState(400); // 每片字符数，默认 400（非常稀疏）
   
   const transmissionTimer = useRef<NodeJS.Timeout | null>(null);
   const autoAdvanceRef = useRef(true);
@@ -40,10 +40,10 @@ export default function SendFilePage() {
       setQrDataUrl(null);
       setFileMeta(null);
       
-      // 自动设置推荐的分片大小（更保守，确保可扫描）
-      const recommended = selectedFile.size < 50 * 1024 ? 600   // <50KB: 600 字符
-        : selectedFile.size < 500 * 1024 ? 800  // 50KB-500KB: 800 字符
-        : 1000;  // >500KB: 1000 字符
+      // 自动设置推荐的分片大小（非常保守，确保可扫描）
+      const recommended = selectedFile.size < 50 * 1024 ? 400   // <50KB: 400 字符
+        : selectedFile.size < 500 * 1024 ? 600  // 50KB-500KB: 600 字符
+        : 800;  // >500KB: 800 字符
       setChunkSize(recommended);
     }
   }, []);
@@ -268,19 +268,19 @@ export default function SendFilePage() {
                 </div>
                 <input
                   type="range"
-                  min="300"
-                  max="1500"
+                  min="200"
+                  max="1200"
                   step="50"
                   value={chunkSize}
                   onChange={(e) => setChunkSize(Number(e.target.value))}
                   className="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer"
                 />
                 <div className="flex justify-between text-xs text-indigo-600 mt-1">
-                  <span>300 (多片)</span>
-                  <span>1500 (少片)</span>
+                  <span>200 (多片)</span>
+                  <span>1200 (少片)</span>
                 </div>
                 <p className="text-xs text-indigo-700 mt-2">
-                  💡 建议范围：600-1000 字符。小文件建议 300-600 字符，二维码更稀疏易扫。
+                  💡 建议范围：400-600 字符。小文件建议 200-400 字符，二维码非常稀疏，手机秒扫。
                 </p>
               </div>
 
@@ -472,9 +472,9 @@ export default function SendFilePage() {
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-800">
               💡 <strong>分片大小建议：</strong>
-              <br/>• 小文件（&lt;100KB）：300-600 字符（二维码稀疏，易扫描）
-              <br/>• 中文件（100KB-1MB）：600-1000 字符
-              <br/>• 大文件（&gt;1MB）：1000-1500 字符（需要更多二维码）
+              <br/>• 小文件（&lt;100KB）：200-400 字符（二维码非常稀疏，手机秒扫）
+              <br/>• 中文件（100KB-1MB）：400-800 字符
+              <br/>• 大文件（&gt;1MB）：800-1200 字符（需要更多二维码）
             </p>
           </div>
         </div>
