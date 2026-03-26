@@ -31,6 +31,7 @@ export default function ReceiveFilePage() {
   const [receivedBytes, setReceivedBytes] = useState<number>(0); // 已接收字节数
   const [avgSpeed, setAvgSpeed] = useState<number>(0); // 平均速度 (kB/s)
   const [currentSpeed, setCurrentSpeed] = useState<number>(0); // 当前速度 (kB/s)
+  const [scanErrorCount, setScanErrorCount] = useState<number>(0); // 扫描错误次数
   
   // 检查是否为 HTTPS 环境
   const isSecureContext = typeof window !== 'undefined' && (window.location.protocol === 'https:' || window.location.hostname === 'localhost');
