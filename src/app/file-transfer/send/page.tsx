@@ -23,7 +23,7 @@ export default function SendFilePage() {
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
-  const [chunkSize, setChunkSize] = useState(2500); // 每片字符数，默认 2500
+  const [chunkSize, setChunkSize] = useState(1500); // 每片字符数，默认 1500（安全值）
   
   const transmissionTimer = useRef<NodeJS.Timeout | null>(null);
   const autoAdvanceRef = useRef(true);
@@ -39,6 +39,12 @@ export default function SendFilePage() {
       setCurrentChunkIndex(-1);
       setQrDataUrl(null);
       setFileMeta(null);
+      
+      // 自动设置推荐的分片大小
+      const recommended = selectedFile.size < 50 * 1024 ? 1200
+        : selectedFile.size < 500 * 1024 ? 1800
+        : 2200;
+      setChunkSize(recommended);
     }
   }, []);
 
@@ -168,6 +174,13 @@ export default function SendFilePage() {
   }, [isTransmitting, currentChunkIndex, chunks.length, chunks, fps, handleNextChunk]);
 
   const estimatedChunks = file ? estimateChunks(file.size) : 0;
+  
+  // 根据文件大小智能推荐分片大小
+  const recommendedChunkSize = file 
+    ? file.size < 50 * 1024 ? 1200  // <50KB: 1200 字符
+    : file.size < 500 * 1024 ? 1800  // 50KB-500KB: 1800 字符
+    : 2200  // >500KB: 2200 字符
+    : 1500;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
@@ -230,14 +243,23 @@ export default function SendFilePage() {
                   <label className="text-sm font-semibold text-indigo-900">
                     📦 分片大小
                   </label>
-                  <span className="text-sm font-bold text-indigo-600">
-                    {chunkSize} 字符/片
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-indigo-600">
+                      {chunkSize} 字符/片
+                    </span>
+                    <button
+                      onClick={() => setChunkSize(recommendedChunkSize)}
+                      className="text-xs px-2 py-1 bg-indigo-200 text-indigo-800 rounded hover:bg-indigo-300 transition-colors"
+                      title="使用推荐值"
+                    >
+                      ⭐ 推荐：{recommendedChunkSize}
+                    </button>
+                  </div>
                 </div>
                 <input
                   type="range"
                   min="500"
-                  max="3500"
+                  max="2500"
                   step="100"
                   value={chunkSize}
                   onChange={(e) => setChunkSize(Number(e.target.value))}
@@ -245,8 +267,11 @@ export default function SendFilePage() {
                 />
                 <div className="flex justify-between text-xs text-indigo-600 mt-1">
                   <span>500 (多片)</span>
-                  <span>3500 (少片)</span>
+                  <span>2500 (少片)</span>
                 </div>
+                <p className="text-xs text-indigo-700 mt-2">
+                  💡 建议范围：1000-2000 字符。超过 2500 可能导致二维码过密无法扫描。
+                </p>
               </div>
 
               <div className="p-4 bg-yellow-50 rounded-lg">
