@@ -83,15 +83,18 @@ export default function ReceiveFilePage() {
       return;
     }
 
-    // 处理结束标识
+    // 处理结束标识（只记录，不停止）
     if ('type' in data && data.type === 'end') {
       setEndMarker(data);
-      // 如果已经收到元数据和所有分片，停止扫描
+      console.log('🏁 收到结束标识，检查数据完整性...');
+      
+      // 如果已经收满所有分片，自动停止
       if (fileMeta && chunks.length >= fileMeta.totalChunks) {
+        console.log('✅ 数据已完整，停止扫描并关闭摄像头');
         setIsScanning(false);
         stopScanner();
       } else {
-        console.log('⏳ 收到结束标识，但数据不完整，继续等待...');
+        console.log(`⏳ 数据不完整 (${chunks.length}/${fileMeta?.totalChunks || '?'})，继续等待下一轮...`);
       }
       return;
     }
@@ -110,16 +113,32 @@ export default function ReceiveFilePage() {
     
     if (isDuplicate) {
       console.log('⏭️  重复分片，跳过:', chunk.index);
+      
+      // 检查是否已经收满
+      if (fileMeta && chunks.length >= fileMeta.totalChunks) {
+        console.log('✅ 数据已收满，停止扫描并关闭摄像头');
+        setIsScanning(false);
+        // 延迟关闭，让用户看到完成状态
+        setTimeout(() => stopScanner(), 500);
+      }
     } else {
       // 添加分片
       chunkSetRef.current.add(chunk.index);
       setChunks(prev => [...prev, chunk]);
       
-      // 更新接收统计（估算字节数：每片约 100 字符，Base64 解码后约 75 字节）
+      // 更新接收统计
       const newReceivedBytes = receivedBytes + Math.round(chunk.data.length * 0.75);
       setReceivedBytes(newReceivedBytes);
       
       console.log(`✅ 收到分片 ${chunk.index + 1}/${chunk.total}, 已接收：${formatFileSize(newReceivedBytes)}`);
+      
+      // 检查是否已经收满
+      if (fileMeta && chunkSetRef.current.size >= fileMeta.totalChunks) {
+        console.log('✅ 所有分片已收满，停止扫描并关闭摄像头');
+        setIsScanning(false);
+        // 延迟关闭，让用户看到完成状态
+        setTimeout(() => stopScanner(), 500);
+      }
     }
     
   }, [receivedBytes]);
