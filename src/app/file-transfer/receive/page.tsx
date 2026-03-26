@@ -105,34 +105,23 @@ export default function ReceiveFilePage() {
       return;
     }
 
-    // 去重：如果已经收到这个分片，跳过
-    if (chunkSetRef.current.has(chunk.index)) {
-      console.log('重复分片，跳过:', chunk.index);
-      return;
-    }
-
-    // 添加分片
-    chunkSetRef.current.add(chunk.index);
-    setChunks(prev => [...prev, chunk]);
+    // 检查是否已收到这个分片
+    const isDuplicate = chunkSetRef.current.has(chunk.index);
     
-    // 更新接收统计（估算字节数：每片约 1800 字符，Base64 解码后约 1350 字节）
-    const newReceivedBytes = receivedBytes + Math.round(chunk.data.length * 0.75);
-    setReceivedBytes(newReceivedBytes);
-    
-    // 实时更新速度统计
-    if (elapsed > 0) {
-      const avg = newReceivedBytes / elapsed / 1024;
-      setAvgSpeed(avg);
+    if (isDuplicate) {
+      console.log('⏭️  重复分片，跳过:', chunk.index);
+    } else {
+      // 添加分片
+      chunkSetRef.current.add(chunk.index);
+      setChunks(prev => [...prev, chunk]);
       
-      // 计算瞬时速度（基于最近一次扫描）
-      const timeSinceLastScan = now - lastScanTimeRef.current;
-      if (timeSinceLastScan > 0 && timeSinceLastScan < 1000) {
-        setCurrentSpeed(Math.round(chunk.data.length * 0.75) / (timeSinceLastScan / 1000) / 1024);
-      }
+      // 更新接收统计（估算字节数：每片约 100 字符，Base64 解码后约 75 字节）
+      const newReceivedBytes = receivedBytes + Math.round(chunk.data.length * 0.75);
+      setReceivedBytes(newReceivedBytes);
+      
+      console.log(`✅ 收到分片 ${chunk.index + 1}/${chunk.total}, 已接收：${formatFileSize(newReceivedBytes)}`);
     }
     
-    console.log(`收到分片 ${chunk.index + 1}/${chunk.total}, 已接收：${formatFileSize(newReceivedBytes)}`);
-
   }, [receivedBytes]);
 
   const stopScanner = useCallback(async () => {
