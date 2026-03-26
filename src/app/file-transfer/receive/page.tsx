@@ -61,12 +61,16 @@ export default function ReceiveFilePage() {
       setAvgSpeed(receivedBytes / elapsed / 1024); // kB/s
     }
 
+    console.log('🔍 尝试解析数据:', decodedText);
     const data = decodeQRData(decodedText);
     
     if (!data) {
-      console.warn('⚠️ 无效的 QR 数据格式:', decodedText.substring(0, 100));
+      console.error('❌ 解析失败！原始数据:', decodedText);
+      setScanErrorCount(prev => prev + 1);
       return;
     }
+    
+    console.log('✅ 解析成功，数据类型:', 'type' in data ? data.type : 'chunk');
 
     // 处理结束标识
     if ('type' in data && data.type === 'end') {
