@@ -26,7 +26,6 @@ export default function ReceiveFilePage() {
   const [mimeType, setMimeType] = useState<string>('');
   const [cameraPermission, setCameraPermission] = useState<'pending' | 'granted' | 'denied'>('pending');
   const [selectedCamera, setSelectedCamera] = useState<string>('environment'); // 'user' | 'environment'
-  const [availableCameras, setAvailableCameras] = useState<{id: string, label: string}[]>([]);
   const [scanRate, setScanRate] = useState<number>(0); // 实时扫描速率 (Hz)
   const [receivedBytes, setReceivedBytes] = useState<number>(0); // 已接收字节数
   const [avgSpeed, setAvgSpeed] = useState<number>(0); // 平均速度 (kB/s)
@@ -133,71 +132,12 @@ export default function ReceiveFilePage() {
     setIsScanning(false);
   }, []);
 
-  const getAvailableCameras = useCallback(async () => {
-    try {
-      // 先请求权限获取设备列表
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      
-      // 停止流
-      stream.getTracks().forEach(track => track.stop());
-      
-      const cameras = videoDevices.map((device, index) => ({
-        id: device.deviceId || (index === 0 ? 'user' : 'environment'),
-        label: device.label || `Camera ${index + 1}`,
-      }));
-      
-      setAvailableCameras(cameras);
-      setCameraPermission('granted');
-      
-      // 默认选择后置摄像头
-      if (cameras.length > 0) {
-        const envCamera = cameras.find(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('environment'));
-        setSelectedCamera(envCamera?.id || 'environment');
-      }
-    } catch (err) {
-      console.error('获取摄像头列表失败:', err);
-      setCameraPermission('denied');
-    }
-  }, []);
+
 
   const startScanner = useCallback(async () => {
-    // 先获取摄像头列表（如果是第一次）
-    if (availableCameras.length === 0 && cameraPermission !== 'denied') {
-      await getAvailableCameras();
-      
-      // 如果获取摄像头列表时权限被拒绝，直接返回
-      if (cameraPermission === 'denied' && availableCameras.length === 0) {
-        setErrorMessage('无法访问摄像头：请确保已授予摄像头权限，然后刷新页面重试');
-        setScanStatus('error');
-        return;
-      }
-    }
-
-    // 请求摄像头权限
-    try {
-      const videoConstraints: MediaTrackConstraints = selectedCamera
-        ? { deviceId: { exact: selectedCamera } }
-        : { facingMode: 'environment' };
-      
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: videoConstraints
-      });
-      
-      // 权限授予，停止流（稍后由 html5-qrcode 重新打开）
-      stream.getTracks().forEach(track => track.stop());
-      setCameraPermission('granted');
-    } catch (err) {
-      console.error('摄像头权限被拒绝:', err);
-      setCameraPermission('denied');
-      setErrorMessage('无法访问摄像头：请确保已授予摄像头权限，然后刷新页面重试');
-      setScanStatus('error');
-      return;
-    }
-
-    // 等待 DOM 更新
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // 重置状态
+    setErrorMessage(null);
+    setScanStatus('scanning');
 
     try {
       const scanner = new Html5Qrcode('qr-reader');
@@ -209,8 +149,11 @@ export default function ReceiveFilePage() {
         aspectRatio: 1.0,
       };
 
+      // 使用 selectedCamera 或默认后置
+      const cameraId = selectedCamera || 'environment';
+      
       await scanner.start(
-        { facingMode: 'environment' },
+        cameraId,
         config,
         handleScanSuccess,
         (error) => {
@@ -219,16 +162,27 @@ export default function ReceiveFilePage() {
       );
 
       setIsScanning(true);
-      setScanStatus('scanning');
+      setCameraPermission('granted');
       setErrorMessage(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('启动扫描仪失败:', err);
-      setErrorMessage(err instanceof Error ? err.message : '启动摄像头失败');
+      setCameraPermission('denied');
       setScanStatus('error');
+      
+      let errorMsg = '无法启动摄像头';
+      if (err.name === 'NotAllowedError') {
+        errorMsg = '摄像头权限被拒绝';
+      } else if (err.name === 'NotFoundError') {
+        errorMsg = '未找到摄像头设备';
+      } else if (err.name === 'NotReadableError') {
+        errorMsg = '摄像头正在被其他应用使用';
+      }
+      
+      setErrorMessage(`${errorMsg}：${err.message || '请检查浏览器权限设置'}`);
     }
-  }, [handleScanSuccess]);
+  }, [handleScanSuccess, selectedCamera]);
 
-  const handleStartScan = useCallback(() => {
+  const handleStartScan = useCallback(async () => {
     // 重置状态
     setChunks([]);
     setFileMeta(null);
@@ -242,7 +196,8 @@ export default function ReceiveFilePage() {
     setCurrentSpeed(0);
     scanCountRef.current = 0;
     startTimeRef.current = Date.now();
-    startScanner();
+    
+    await startScanner();
   }, [startScanner]);
 
   const handleStopScan = useCallback(async () => {
@@ -357,26 +312,33 @@ export default function ReceiveFilePage() {
             1️⃣ 扫描二维码
           </h2>
 
-          {/* Camera Selection */}
-          {!isScanning && availableCameras.length > 0 && (
+          {/* Camera Selection - Simple Toggle */}
+          {!isScanning && (
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 📷 选择摄像头
               </label>
-              <div className="flex gap-2 flex-wrap">
-                {availableCameras.map((camera) => (
-                  <button
-                    key={camera.id}
-                    onClick={() => setSelectedCamera(camera.id)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      selectedCamera === camera.id
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {camera.label}
-                  </button>
-                ))}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedCamera('environment')}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    selectedCamera === 'environment'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  📱 后置摄像头
+                </button>
+                <button
+                  onClick={() => setSelectedCamera('user')}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    selectedCamera === 'user'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  🤳 前置摄像头
+                </button>
               </div>
             </div>
           )}
