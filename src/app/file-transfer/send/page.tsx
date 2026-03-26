@@ -23,7 +23,7 @@ export default function SendFilePage() {
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
-  const [chunkSize, setChunkSize] = useState(1500); // 每片字符数，默认 1500（安全值）
+  const [chunkSize, setChunkSize] = useState(1000); // 每片字符数，默认 1000（安全值）
   
   const transmissionTimer = useRef<NodeJS.Timeout | null>(null);
   const autoAdvanceRef = useRef(true);
@@ -40,10 +40,10 @@ export default function SendFilePage() {
       setQrDataUrl(null);
       setFileMeta(null);
       
-      // 自动设置推荐的分片大小
-      const recommended = selectedFile.size < 50 * 1024 ? 1200
-        : selectedFile.size < 500 * 1024 ? 1800
-        : 2200;
+      // 自动设置推荐的分片大小（更保守）
+      const recommended = selectedFile.size < 50 * 1024 ? 800   // <50KB: 800 字符
+        : selectedFile.size < 500 * 1024 ? 1000  // 50KB-500KB: 1000 字符
+        : 1200;  // >500KB: 1200 字符
       setChunkSize(recommended);
     }
   }, []);
@@ -87,14 +87,24 @@ export default function SendFilePage() {
       setFileMeta({ name: file.name, size: file.size });
       setCurrentChunkIndex(0);
       
-      // 生成第一个二维码
-      const qrData = encodeQRData(allChunks[0]);
-      const qrDataUrl = await QRCode.toDataURL(qrData, {
-        width: 500,  // 增大尺寸
-        margin: 3,
-        errorCorrectionLevel: 'H',  // 最高纠错级别
-      });
-      setQrDataUrl(qrDataUrl);
+      // 生成第一个二维码（带错误处理）
+      try {
+        const qrData = encodeQRData(allChunks[0]);
+        const qrDataUrl = await QRCode.toDataURL(qrData, {
+          width: 500,
+          margin: 3,
+          errorCorrectionLevel: 'H',
+        });
+        setQrDataUrl(qrDataUrl);
+      } catch (err: any) {
+        if (err.message?.includes('too big')) {
+          setError(`分片数据过大，请调小分片大小（建议 800-1000 字符）`);
+        } else {
+          setError(`生成二维码失败：${err.message}`);
+        }
+        setIsGenerating(false);
+        return;
+      }
       
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败');
@@ -259,7 +269,7 @@ export default function SendFilePage() {
                 <input
                   type="range"
                   min="500"
-                  max="2500"
+                  max="2000"
                   step="100"
                   value={chunkSize}
                   onChange={(e) => setChunkSize(Number(e.target.value))}
@@ -267,10 +277,10 @@ export default function SendFilePage() {
                 />
                 <div className="flex justify-between text-xs text-indigo-600 mt-1">
                   <span>500 (多片)</span>
-                  <span>2500 (少片)</span>
+                  <span>2000 (少片)</span>
                 </div>
                 <p className="text-xs text-indigo-700 mt-2">
-                  💡 建议范围：1000-2000 字符。超过 2500 可能导致二维码过密无法扫描。
+                  💡 建议范围：800-1200 字符。超过 2000 可能导致二维码容量超限。
                 </p>
               </div>
 
@@ -462,9 +472,9 @@ export default function SendFilePage() {
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-800">
               💡 <strong>分片大小建议：</strong>
-              <br/>• 小文件（&lt;100KB）：1500-2000 字符
-              <br/>• 中文件（100KB-1MB）：2500-3000 字符
-              <br/>• 大文件（&gt;1MB）：3000-3500 字符（二维码会更密集）
+              <br/>• 小文件（&lt;100KB）：800-1000 字符
+              <br/>• 中文件（100KB-1MB）：1000-1200 字符
+              <br/>• 大文件（&gt;1MB）：1200-1500 字符（需要更多二维码）
             </p>
           </div>
         </div>
