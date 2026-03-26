@@ -168,8 +168,12 @@ export default function ReceiveFilePage() {
 
     // 请求摄像头权限
     try {
+      const videoConstraints: MediaTrackConstraints = selectedCamera
+        ? { deviceId: { exact: selectedCamera } }
+        : { facingMode: 'environment' };
+      
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { deviceId: selectedCamera ? { exact: selectedCamera } : { facingMode: 'environment' } }
+        video: videoConstraints
       });
       
       // 权限授予，停止流（稍后由 html5-qrcode 重新打开）
