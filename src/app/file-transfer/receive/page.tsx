@@ -31,26 +31,36 @@ export default function FileTransferReceivePage() {
   // 处理解码完成（移到 useQrScanner 之前定义）
   const handleDecoded = useCallback((data: Uint8Array) => {
     try {
+      console.log('解码完成，数据大小:', data.length)
+      
       // 提取元数据 [metaLength(4)][meta][fileData]
       const view = new DataView(data.buffer)
       const metaLength = view.getUint32(0, false)
       
+      console.log('元数据长度:', metaLength)
+      
       const metaBytes = data.slice(4, 4 + metaLength)
       const metaJson = new TextDecoder().decode(metaBytes)
+      console.log('元数据 JSON:', metaJson)
+      
       const meta: FileMeta = JSON.parse(metaJson)
       
       setFileMeta(meta)
       
       // 提取文件数据
       const fileData = data.slice(4 + metaLength)
+      console.log('文件数据大小:', fileData.length)
       
       // 创建下载链接
       const blob = new Blob([fileData], { type: meta.contentType })
       const url = URL.createObjectURL(blob)
+      console.log('创建下载 URL:', url)
+      
       setDownloadUrl(url)
       setIsComplete(true)
     } catch (e) {
       console.error('解析文件失败:', e)
+      alert('解析文件失败：' + (e as Error).message)
     }
   }, [])
 
@@ -330,14 +340,19 @@ export default function FileTransferReceivePage() {
             </div>
 
             {/* 下载按钮 */}
-            {downloadUrl && (
-              <button
-                onClick={handleDownload}
-                className="w-full px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition flex items-center justify-center gap-2"
-              >
-                <span>⬇️</span>
-                <span>下载文件</span>
-              </button>
+            <button
+              onClick={handleDownload}
+              disabled={!downloadUrl}
+              className="w-full px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>⬇️</span>
+              <span>{downloadUrl ? '下载文件' : '准备下载中...'}</span>
+            </button>
+            
+            {!downloadUrl && (
+              <p className="text-sm text-yellow-600 mt-2 text-center">
+                正在处理文件，请稍候...
+              </p>
             )}
           </div>
         )}
