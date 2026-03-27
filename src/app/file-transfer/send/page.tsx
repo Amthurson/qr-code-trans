@@ -1,483 +1,287 @@
-'use client';
+/**
+ * 文件传输发送端 - 基于喷泉码的文件二维码传输
+ * 参考 Qrs 项目实现
+ */
 
-import React, { useState, useCallback, useRef } from 'react';
-import {
-  fileToBase64,
-  chunkData,
-  createFileMetadata,
-  createEndMarker,
-  encodeQRData,
-  crc32,
-  formatFileSize,
-  estimateChunks,
-} from '@/lib/file-transfer';
-import QRCode from 'qrcode';
+'use client'
 
-export default function SendFilePage() {
-  const [file, setFile] = useState<File | null>(null);
-  const [chunks, setChunks] = useState<any[]>([]);
-  const [currentChunkIndex, setCurrentChunkIndex] = useState(-1);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isTransmitting, setIsTransmitting] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
-  const [chunkSize, setChunkSize] = useState(100); // 每片字符数，默认 100（统一密度）
-  
-  const transmissionTimer = useRef<NodeJS.Timeout | null>(null);
-  const autoAdvanceRef = useRef(true);
-  const [fps, setFps] = useState(10); // 默认 10 FPS，支持快速扫描
-  const [loopCount, setLoopCount] = useState(0); // 循环次数
+import { useState, useRef, useCallback } from 'react'
+import { useQrFountain } from '@/hooks/useQrFountain'
+import QrCodeDisplay from '@/components/QrCodeDisplay'
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      setError(null);
-      setChunks([]);
-      setCurrentChunkIndex(-1);
-      setQrDataUrl(null);
-      setFileMeta(null);
-      
-      // 自动设置推荐的分片大小（统一密度，100 字符/片）
-      const recommended = 100;  // 统一 100 字符，确保所有二维码密度一致
-      setChunkSize(recommended);
+export default function FileTransferSendPage() {
+  const [file, setFile] = useState<File | null>(null)
+  const [fileData, setFileData] = useState<Uint8Array | null>(null)
+  const [sliceSize, setSliceSize] = useState(1000)
+  const [fps, setFps] = useState(20)
+  const [isPrefixed, setIsPrefixed] = useState(true)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 处理文件选择
+  const handleFileChange = useCallback(async (selectedFile?: File) => {
+    if (!selectedFile) {
+      setFile(null)
+      setFileData(null)
+      return
     }
-  }, []);
-
-  const handleGenerateChunks = useCallback(async () => {
-    if (!file) return;
-
-    setIsGenerating(true);
-    setError(null);
 
     try {
-      // 转换为 Base64
-      const base64 = await fileToBase64(file);
+      const buffer = await selectedFile.arrayBuffer()
+      const uint8Data = new Uint8Array(buffer)
       
-      // 计算文件 CRC32
-      const fileCrc = crc32(base64);
-      
-      // 分片（使用设定的分片大小）
-      const dataChunks = chunkData(base64, chunkSize);
-      
-      // 创建文件元数据（作为最后一个数据分片）
-      const metaChunk = createFileMetadata(
-        file.name,
-        file.size,
-        file.type || 'application/octet-stream',
-        dataChunks.length,
-        fileCrc
-      );
-      
-      // 创建结束标识
-      const endMarker = createEndMarker(metaChunk.fileId);
-      
-      // 合并所有分片：元数据 + 数据分片 + 结束标识
-      // 元数据放在最前面，这样新加入的接收端第一轮就能收到
-      const allChunks = [
-        metaChunk,
-        ...dataChunks,
-        endMarker,
-      ];
-      
-      setChunks(allChunks);
-      setFileMeta({ name: file.name, size: file.size });
-      setCurrentChunkIndex(0);
-      
-      // 生成第一个二维码（带错误处理）
-      try {
-        const qrData = encodeQRData(allChunks[0]);
-        const qrDataUrl = await QRCode.toDataURL(qrData, {
-          width: 500,
-          margin: 3,
-          errorCorrectionLevel: 'H',
-        });
-        setQrDataUrl(qrDataUrl);
-      } catch (err: any) {
-        if (err.message?.includes('too big')) {
-          setError(`分片数据过大，请调小分片大小（建议 800-1000 字符）`);
-        } else {
-          setError(`生成二维码失败：${err.message}`);
-        }
-        setIsGenerating(false);
-        return;
+      // 添加文件元数据（文件名、类型）
+      const meta = {
+        filename: selectedFile.name,
+        contentType: selectedFile.type || 'application/octet-stream',
+        size: selectedFile.size,
+        lastModified: selectedFile.lastModified,
       }
       
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '生成失败');
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [file]);
-
-  const handleStartTransmission = useCallback(() => {
-    setIsTransmitting(true);
-    autoAdvanceRef.current = true;
-  }, []);
-
-  const handleStopTransmission = useCallback(() => {
-    setIsTransmitting(false);
-    autoAdvanceRef.current = false;
-    if (transmissionTimer.current) {
-      clearInterval(transmissionTimer.current);
-      transmissionTimer.current = null;
-    }
-  }, []);
-
-  const handleNextChunk = useCallback(async () => {
-    if (currentChunkIndex < chunks.length - 1) {
-      const nextIndex = currentChunkIndex + 1;
-      setCurrentChunkIndex(nextIndex);
+      const metaJson = JSON.stringify(meta)
+      const metaBytes = new TextEncoder().encode(metaJson)
       
-      const qrData = encodeQRData(chunks[nextIndex]);
-      const qrDataUrl = await QRCode.toDataURL(qrData, {
-        width: 500,  // 增大尺寸
-        margin: 3,
-        errorCorrectionLevel: 'H',  // 最高纠错级别
-      });
-      setQrDataUrl(qrDataUrl);
-      setProgress(((nextIndex + 1) / chunks.length) * 100);
-    }
-  }, [currentChunkIndex, chunks]);
-
-  // 自动切换分片（支持循环播放）
-  React.useEffect(() => {
-    if (isTransmitting) {
-      const interval = Math.round(1000 / fps); // 根据 FPS 计算间隔
+      // 合并元数据和文件数据 [metaLength(4)][meta][data]
+      const header = new Uint8Array(4)
+      const view = new DataView(header.buffer)
+      view.setUint32(0, metaBytes.length, false)
       
-      transmissionTimer.current = setInterval(() => {
-        if (autoAdvanceRef.current) {
-          if (currentChunkIndex < chunks.length - 1) {
-            handleNextChunk();
-          } else {
-            // 到达最后一个分片，循环回第一个
-            setCurrentChunkIndex(0);
-            setLoopCount(prev => prev + 1);
-            
-            // 重新生成第一个二维码
-            const qrData = encodeQRData(chunks[0]);
-            QRCode.toDataURL(qrData, {
-              width: 500,  // 增大尺寸
-              margin: 3,
-              errorCorrectionLevel: 'H',  // 最高纠错级别
-            }).then(setQrDataUrl);
-            
-            setProgress(0);
-            
-            // 第一轮结束后，自动降低 FPS 便于扫描
-            if (loopCount === 0 && fps > 3) {
-              setFps(3);  // 第二轮开始降到 3 FPS
-            }
-          }
-        }
-      }, interval);
+      const combinedData = new Uint8Array(header.length + metaBytes.length + uint8Data.length)
+      combinedData.set(header, 0)
+      combinedData.set(metaBytes, header.length)
+      combinedData.set(uint8Data, header.length + metaBytes.length)
+      
+      setFile(selectedFile)
+      setFileData(combinedData)
+    } catch (e) {
+      console.error('读取文件失败:', e)
+      alert('读取文件失败：' + (e as Error).message)
     }
+  }, [])
 
-    return () => {
-      if (transmissionTimer.current) {
-        clearInterval(transmissionTimer.current);
-      }
-    };
-  }, [isTransmitting, currentChunkIndex, chunks.length, chunks, fps, handleNextChunk]);
+  // 使用喷泉码生成二维码
+  const {
+    qrData,
+    block,
+    count,
+    fps: actualFps,
+    bitrate,
+    totalBytes,
+    isReady,
+    error,
+  } = useQrFountain({
+    data: fileData || new Uint8Array(),
+    sliceSize,
+    compress: true,
+    fps,
+  })
 
-  const estimatedChunks = file ? estimateChunks(file.size) : 0;
-  
-  // 根据文件大小智能推荐分片大小
-  const recommendedChunkSize = file 
-    ? file.size < 50 * 1024 ? 1200  // <50KB: 1200 字符
-    : file.size < 500 * 1024 ? 1800  // 50KB-500KB: 1800 字符
-    : 2200  // >500KB: 2200 字符
-    : 1500;
+  // 计算预估二维码数量
+  const estimatedQrCount = fileData ? Math.ceil(fileData.length / sliceSize) : 0
+  const estimatedTime = estimatedQrCount > 0 ? Math.ceil(estimatedQrCount / fps) : 0
+
+  // 获取当前 URL 前缀
+  const prefix = isPrefixed 
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/file-transfer/receive#`
+    : ''
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
+    <div className="min-h-screen bg-gradient-to-b from-purple-50 to-white p-4 sm:p-6">
+      <div className="max-w-6xl mx-auto">
+        {/* 头部 */}
+        <header className="mb-6">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">
-            📤 文件发送端
+            📦 离线文件传输 - 发送端
           </h1>
           <p className="text-gray-600">
-            选择文件 → 生成二维码序列 → 接收端扫描
+            选择文件 → 生成二维码序列 → 接收端连续扫码 → 重组文件
           </p>
-        </div>
+        </header>
 
-        {/* File Selection */}
+        {/* 文件选择区域 */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold text-gray-700 mb-4">1️⃣ 选择文件</h2>
-          
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-indigo-500 transition-colors">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
             <input
+              ref={fileInputRef}
               type="file"
-              id="file-input"
-              onChange={handleFileSelect}
+              onChange={(e) => handleFileChange(e.target.files?.[0])}
               className="hidden"
-              accept="*/*"
             />
-            <label
-              htmlFor="file-input"
-              className="cursor-pointer flex flex-col items-center"
+            
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-6 py-3 bg-purple-600 text-white font-semibold rounded-lg hover:bg-purple-700 transition flex items-center gap-2"
             >
-              <svg
-                className="w-16 h-16 text-gray-400 mb-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                />
-              </svg>
-              <span className="text-gray-600 mb-2">
-                {file ? file.name : '点击或拖拽文件到此处'}
-              </span>
-              {file && (
-                <span className="text-sm text-gray-500">
-                  {formatFileSize(file.size)}
-                </span>
-              )}
-            </label>
+              <span>📁</span>
+              <span>{file ? '更换文件' : '选择文件'}</span>
+            </button>
+
+            {file && (
+              <div className="flex-1 bg-gray-50 rounded-lg p-3">
+                <p className="font-medium text-gray-800 truncate">{file.name}</p>
+                <p className="text-sm text-gray-500">
+                  {(file.size / 1024).toFixed(2)} KB · {file.type || '未知类型'}
+                </p>
+              </div>
+            )}
           </div>
 
-          {file && !chunks.length && (
-            <div className="space-y-4">
-              {/* 分片大小调节 */}
-              <div className="p-4 bg-indigo-50 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-semibold text-indigo-900">
-                    📦 分片大小
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-indigo-600">
-                      {chunkSize} 字符/片
-                    </span>
-                    <button
-                      onClick={() => setChunkSize(recommendedChunkSize)}
-                      className="text-xs px-2 py-1 bg-indigo-200 text-indigo-800 rounded hover:bg-indigo-300 transition-colors"
-                      title="使用推荐值"
-                    >
-                      ⭐ 推荐：{recommendedChunkSize}
-                    </button>
-                  </div>
-                </div>
-                <input
-                  type="range"
-                  min="50"
-                  max="500"
-                  step="50"
-                  value={chunkSize}
-                  onChange={(e) => setChunkSize(Number(e.target.value))}
-                  className="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer"
-                />
-                <div className="flex justify-between text-xs text-indigo-600 mt-1">
-                  <span>50 (超多片)</span>
-                  <span>500 (少片)</span>
-                </div>
-                <p className="text-xs text-indigo-700 mt-2">
-                  💡 推荐：100 字符/片。所有二维码密度统一，扫描器更容易适应，支持高速扫描。
-                </p>
-              </div>
-
-              <div className="p-4 bg-yellow-50 rounded-lg">
-                <p className="text-sm text-yellow-800">
-                  📊 预估分片数量：<strong>{Math.ceil((estimatedChunks * 1800) / chunkSize) + 2}</strong> 个二维码
-                  （包含元数据和结束标识）
-                </p>
-                <p className="text-xs text-yellow-600 mt-1">
-                  每个二维码约 2 秒，总耗时约 {Math.ceil((Math.ceil((estimatedChunks * 1800) / chunkSize) + 2) * 2 / 60)} 分钟
-                </p>
-              </div>
+          {/* 配置选项 */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                分片大小 (Slice Size)
+              </label>
+              <input
+                type="number"
+                value={sliceSize}
+                onChange={(e) => setSliceSize(parseInt(e.target.value) || 1000)}
+                min="100"
+                max="2000"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+              />
+              <p className="text-xs text-gray-500 mt-1">推荐：1000-1500</p>
             </div>
-          )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                目标 FPS
+              </label>
+              <input
+                type="range"
+                value={fps}
+                onChange={(e) => setFps(parseInt(e.target.value))}
+                min="1"
+                max="60"
+                className="w-full"
+              />
+              <p className="text-sm text-gray-600 mt-1">{fps} FPS</p>
+            </div>
+
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                <input
+                  type="checkbox"
+                  checked={isPrefixed}
+                  onChange={(e) => setIsPrefixed(e.target.checked)}
+                  className="rounded"
+                />
+                添加 Scanner URL 前缀
+              </label>
+              <p className="text-xs text-gray-500">
+                扫码后自动跳转到接收页面
+              </p>
+            </div>
+          </div>
         </div>
 
-        {/* Generate Button */}
-        {file && !chunks.length && (
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+        {/* 文件信息统计 */}
+        {fileData && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white rounded-xl shadow-lg p-4 text-center">
+              <p className="text-sm text-gray-500">文件大小</p>
+              <p className="text-2xl font-bold text-purple-600">
+                {(fileData.length / 1024).toFixed(2)} KB
+              </p>
+            </div>
+            <div className="bg-white rounded-xl shadow-lg p-4 text-center">
+              <p className="text-sm text-gray-500">预估二维码数</p>
+              <p className="text-2xl font-bold text-blue-600">
+                ~{estimatedQrCount} 个
+              </p>
+            </div>
+            <div className="bg-white rounded-xl shadow-lg p-4 text-center">
+              <p className="text-sm text-gray-500">预估传输时间</p>
+              <p className="text-2xl font-bold text-green-600">
+                ~{Math.floor(estimatedTime / 60)}:{String(estimatedTime % 60).padStart(2, '0')}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl shadow-lg p-4 text-center">
+              <p className="text-sm text-gray-500">实时比特率</p>
+              <p className="text-2xl font-bold text-orange-600">
+                {bitrate.toFixed(1)} Kbps
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 二维码显示区域 */}
+        {fileData && isReady && (
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              📱 扫描二维码传输文件
+            </h2>
+
+            {/* 实时状态 */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+              <div>
+                <p className="text-sm text-gray-500">已生成帧数</p>
+                <p className="text-2xl font-bold text-blue-600">{count}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">实时 FPS</p>
+                <p className="text-2xl font-bold text-green-600">{actualFps.toFixed(1)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">分片大小</p>
+                <p className="text-2xl font-bold text-purple-600">{sliceSize}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">总块数 (k)</p>
+                <p className="text-2xl font-bold text-orange-600">{block?.k || 0}</p>
+              </div>
+            </div>
+
+            {/* 二维码 */}
+            {qrData && (
+              <div className="flex justify-center mb-6">
+                <QrCodeDisplay
+                  data={qrData}
+                  size={Math.min(400, window.innerWidth - 48)}
+                  border={4}
+                />
+              </div>
+            )}
+
+            {/* 使用说明 */}
+            <div className="bg-purple-50 rounded-lg p-4">
+              <h3 className="font-semibold text-purple-800 mb-2">📖 使用说明</h3>
+              <ol className="text-sm text-purple-700 space-y-1 list-decimal list-inside">
+                <li>保持手机屏幕常亮，二维码会自动刷新</li>
+                <li>接收端使用摄像头连续扫描</li>
+                <li>喷泉码特性：无需按顺序，任意帧都可解码</li>
+                <li>接收端进度达到 100% 后自动重组文件</li>
+                <li>建议扫描速度：{fps} FPS，预计时间：~{Math.floor(estimatedTime / 60)}分{estimatedTime % 60}秒</li>
+              </ol>
+            </div>
+
+            {/* 错误提示 */}
+            {error && (
+              <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-red-800 text-sm">❌ 错误：{error.message}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 空状态提示 */}
+        {!fileData && (
+          <div className="bg-white rounded-xl shadow-lg p-12 text-center">
+            <div className="text-6xl mb-4">📦</div>
+            <h3 className="text-xl font-semibold text-gray-800 mb-2">
+              选择文件开始传输
+            </h3>
+            <p className="text-gray-600 mb-6">
+              支持任意文件类型：图片、文档、音频、视频等
+            </p>
             <button
-              onClick={handleGenerateChunks}
-              disabled={isGenerating}
-              className="w-full py-3 px-6 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:bg-gray-400 transition-colors"
+              onClick={() => fileInputRef.current?.click()}
+              className="px-8 py-3 bg-purple-600 text-white font-semibold rounded-lg hover:bg-purple-700 transition"
             >
-              {isGenerating ? '生成中...' : '2️⃣ 生成二维码序列'}
+              📁 选择文件
             </button>
           </div>
         )}
-
-        {/* Error Display */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-6">
-            ❌ {error}
-          </div>
-        )}
-
-        {/* QR Code Display */}
-        {chunks.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h2 className="text-xl font-semibold text-gray-700 mb-4">
-              3️⃣ 展示二维码
-            </h2>
-
-            {/* FPS Control */}
-            <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-semibold text-gray-700">
-                  ⚡ 刷新率 (FPS)
-                </label>
-                <span className="text-sm font-bold text-indigo-600">
-                  {fps} FPS
-                </span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="20"
-                step="1"
-                value={fps}
-                onChange={(e) => setFps(Number(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                disabled={isTransmitting}
-              />
-              <div className="flex justify-between text-xs text-gray-500 mt-1">
-                <span>1 FPS (慢速)</span>
-                <span>20 FPS (超快)</span>
-              </div>
-            </div>
-
-            {/* Progress Bar */}
-            <div className="mb-6">
-              <div className="flex justify-between text-sm text-gray-600 mb-2">
-                <span>
-                  进度：{currentChunkIndex + 1} / {chunks.length}
-                  {loopCount > 0 && (
-                    <span className="ml-2 text-green-600">
-                      (第 {loopCount + 1} 轮)
-                    </span>
-                  )}
-                </span>
-                <span>{progress.toFixed(0)}%</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div
-                  className="bg-indigo-600 h-3 rounded-full transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Current Chunk Info */}
-            {currentChunkIndex >= 0 && currentChunkIndex < chunks.length && (
-              <div className="text-center mb-6">
-                <div className={`inline-block px-4 py-2 rounded-full text-sm font-semibold mb-4 ${
-                  chunks[currentChunkIndex].type === 'end'
-                    ? 'bg-green-100 text-green-700'
-                    : chunks[currentChunkIndex].type === 'file-meta'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'bg-gray-100 text-gray-700'
-                }`}>
-                  {chunks[currentChunkIndex].type === 'end'
-                    ? '🏁 结束标识'
-                    : chunks[currentChunkIndex].type === 'file-meta'
-                    ? '📋 文件元数据'
-                    : `📦 数据分片 ${currentChunkIndex + 1}/${chunks.length - 2}`}
-                </div>
-
-                {qrDataUrl && (
-                  <div className="inline-block p-4 bg-white rounded-lg shadow-md">
-                    <img src={qrDataUrl} alt="QR Code" className="w-64 h-64" />
-                  </div>
-                )}
-
-                <p className="text-sm text-gray-500 mt-4">
-                  {isTransmitting ? '🔄 自动切换中...' : '⏸️ 已暂停'}
-                </p>
-              </div>
-            )}
-
-            {/* Control Buttons */}
-            <div className="flex gap-4">
-              {!isTransmitting ? (
-                <button
-                  onClick={handleStartTransmission}
-                  className="flex-1 py-3 px-6 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors"
-                >
-                  ▶️ 开始传输
-                </button>
-              ) : (
-                <button
-                  onClick={handleStopTransmission}
-                  className="flex-1 py-3 px-6 bg-yellow-600 text-white rounded-lg font-semibold hover:bg-yellow-700 transition-colors"
-                >
-                  ⏸️ 暂停
-                </button>
-              )}
-
-              {isTransmitting && (
-                <button
-                  onClick={handleNextChunk}
-                  className="flex-1 py-3 px-6 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
-                >
-                  ⏭️ 下一个
-                </button>
-              )}
-
-              {/* Reset Button */}
-              {!isTransmitting && currentChunkIndex >= chunks.length - 1 && (
-                <button
-                  onClick={() => {
-                    setFile(null);
-                    setChunks([]);
-                    setCurrentChunkIndex(-1);
-                    setQrDataUrl(null);
-                    setFileMeta(null);
-                  }}
-                  className="flex-1 py-3 px-6 bg-gray-600 text-white rounded-lg font-semibold hover:bg-gray-700 transition-colors"
-                >
-                  🔄 重新选择
-                </button>
-              )}
-            </div>
-
-            {/* Completion Message */}
-            {loopCount > 0 && (
-              <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg text-center">
-                <p className="text-green-800 font-semibold">
-                  🔄 循环播放中 (第 {loopCount + 1} 轮)
-                </p>
-                <p className="text-sm text-green-600 mt-1">
-                  接收端可以中途加入扫描，无需等待从头开始
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Instructions */}
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h3 className="font-semibold text-gray-700 mb-3">📖 使用说明</h3>
-          <ol className="space-y-2 text-sm text-gray-600">
-            <li>1. 选择要传输的文件（支持任意类型）</li>
-            <li>2. 使用推荐的分片大小（100 字符/片，密度统一）</li>
-            <li>3. 点击"生成二维码序列"，系统会自动分片并编码</li>
-            <li>4. 调节 FPS（推荐 10-20 FPS，高速扫描）</li>
-            <li>5. 点击"开始传输"，二维码会循环播放</li>
-            <li>6. 接收端使用摄像头连续扫描即可（支持中途加入）</li>
-          </ol>
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-            <p className="text-sm text-blue-800">
-              💡 <strong>分片大小建议：</strong>
-              <br/>• <strong>推荐：100 字符/片</strong>（所有二维码密度统一，易于扫描）
-              <br/>• 小文件：50-150 字符（超稀疏，可高速扫描）
-              <br/>• 大文件：150-300 字符（减少二维码总数）
-            </p>
-          </div>
-        </div>
       </div>
     </div>
-  );
+  )
 }

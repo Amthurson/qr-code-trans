@@ -1,518 +1,280 @@
-'use client';
+/**
+ * 医院端 - 扫码解码喷泉码数据
+ * 基于 Qrs 项目的 Luby Transform 实现
+ */
 
-import { useState, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { Html5Qrcode } from 'html5-qrcode';
-import { decompress } from '@/lib/compressor';
-import { decodeQuestionnaire } from '@/lib/encoder';
-import { scoliosisQuestionnaire } from '@/lib/questions';
-import { stressTestQuestionnaire } from '@/lib/stress-test';
-import type { QuestionnaireTemplate, Question } from '@/types';
+'use client'
 
-// 所有已知问卷模板
-const ALL_TEMPLATES: QuestionnaireTemplate[] = [
-  scoliosisQuestionnaire,
-  stressTestQuestionnaire,
-];
-
-// 根据解码出的题目 ID 自动匹配最佳模板
-function findBestTemplate(answerIds: number[]): QuestionnaireTemplate {
-  let bestTemplate = scoliosisQuestionnaire;
-  let bestMatchCount = 0;
-
-  for (const tpl of ALL_TEMPLATES) {
-    const tplIds = new Set(tpl.questions.map(q => q.id));
-    const matchCount = answerIds.filter(id => tplIds.has(id)).length;
-    if (matchCount > bestMatchCount) {
-      bestMatchCount = matchCount;
-      bestTemplate = tpl;
-    }
-  }
-  return bestTemplate;
-}
-
-// 从所有模板中查找题目定义（兜底）
-function findQuestion(questionId: number): Question | undefined {
-  for (const tpl of ALL_TEMPLATES) {
-    const q = tpl.questions.find(q => q.id === questionId);
-    if (q) return q;
-  }
-  return undefined;
-}
+import { useState, useRef } from 'react'
+import { useQrScanner } from '@/hooks/useQrScanner'
+import { fromBase64, binaryToBlock } from '@/hooks/lt-encoder'
 
 export default function HospitalPage() {
-  const router = useRouter();
-  const [inputMode, setInputMode] = useState<'input' | 'scan' | 'upload'>('input');
-  const [qrString, setQrString] = useState('');
-  const [decodedData, setDecodedData] = useState<any>(null);
-  const [error, setError] = useState('');
-  const [scanning, setScanning] = useState(false);
-  const [cameraId, setCameraId] = useState('');
-  const [cameras, setCameras] = useState<{id: string, label: string}[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [manualInput, setManualInput] = useState('')
+  const [decodedResult, setDecodedResult] = useState<any | null>(null)
+  const [inputMode, setInputMode] = useState<'camera' | 'manual'>('camera')
+  
+  const {
+    videoRef,
+    isScanning,
+    progress,
+    isComplete,
+    decodedData,
+    error,
+    startScan,
+    stopScan,
+    reset,
+  } = useQrScanner({
+    onDecoded: (data) => {
+      try {
+        const text = new TextDecoder().decode(data)
+        const result = JSON.parse(text)
+        setDecodedResult(result)
+      } catch (e) {
+        console.error('解析失败:', e)
+      }
+    },
+    maxScansPerSecond: 30,
+  })
 
-  // 一键启动摄像头（获取权限 + 选择后置 + 启动）
-  const startScanner = async () => {
+  // 处理手动输入
+  const handleManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manualInput.trim()) return
+
     try {
-      setError('');
+      // 解析 Base64
+      const binary = fromBase64(manualInput.trim())
+      const block = binaryToBlock(binary)
       
-      // 1. 请求摄像头权限
-      console.log('📷 请求摄像头权限...');
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      // 立即释放预览流
-      stream.getTracks().forEach(t => t.stop());
-      console.log('✅ 权限已获取');
-      
-      // 2. 获取摄像头列表
-      const devices = await Html5Qrcode.getCameras();
-      console.log('可用摄像头:', devices);
-      setCameras(devices);
-      
-      if (devices.length === 0) {
-        throw new Error('未找到摄像头');
-      }
-      
-      // 3. 选择后置摄像头
-      const backCamera = devices.find(d =>
-        d.label.toLowerCase().includes('back') ||
-        d.label.toLowerCase().includes('rear') ||
-        d.label.toLowerCase().includes('environment')
-      );
-      const selectedCam = backCamera || devices[0];
-      console.log('选择摄像头:', selectedCam.label);
-      setCameraId(selectedCam.id);
-      
-      // 4. 确保 DOM 元素存在
-      const qrReaderElement = document.getElementById('qr-reader');
-      if (!qrReaderElement) {
-        throw new Error('扫码容器未找到');
-      }
-      qrReaderElement.innerHTML = '';
-      
-      // 5. 启动扫码
-      setScanning(true);
-      const scanner = new Html5Qrcode('qr-reader');
-      scannerRef.current = scanner;
-      
-      const onSuccess = (decodedText: string) => {
-        console.log('✅ 扫码成功:', decodedText);
-        handleDecode(decodedText);
-        stopScanner();
-      };
-      
-      // 尝试方案1：设备 ID
-      try {
-        console.log('🎥 方案1: 设备 ID:', selectedCam.id);
-        await scanner.start(
-          selectedCam.id,
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          onSuccess, () => {}
-        );
-        console.log('✅ 方案1成功');
-        return;
-      } catch (e1: any) {
-        console.warn('⚠️ 方案1失败:', e1.message);
-        try { await scanner.stop(); } catch {}
-        qrReaderElement.innerHTML = '';
-      }
-      
-      // 尝试方案2：facingMode environment
-      try {
-        console.log('🎥 方案2: facingMode environment');
-        const scanner2 = new Html5Qrcode('qr-reader');
-        scannerRef.current = scanner2;
-        await scanner2.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          onSuccess, () => {}
-        );
-        console.log('✅ 方案2成功');
-        return;
-      } catch (e2: any) {
-        console.warn('⚠️ 方案2失败:', e2.message);
-        try { if (scannerRef.current) await scannerRef.current.stop(); } catch {}
-        qrReaderElement.innerHTML = '';
-      }
-      
-      // 尝试方案3：facingMode user（前置摄像头兜底）
-      try {
-        console.log('🎥 方案3: facingMode user（前置兜底）');
-        const scanner3 = new Html5Qrcode('qr-reader');
-        scannerRef.current = scanner3;
-        await scanner3.start(
-          { facingMode: 'user' },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          onSuccess, () => {}
-        );
-        console.log('✅ 方案3成功（前置摄像头）');
-        return;
-      } catch (e3: any) {
-        console.warn('⚠️ 方案3也失败:', e3.message);
-      }
-      
-      throw new Error('所有摄像头启动方案均失败，请尝试上传图片');
-      
-    } catch (err: any) {
-      console.error('❌ 启动失败:', err);
-      let msg = err.message || '未知错误';
-      if (err.name === 'NotAllowedError') msg = '摄像头权限被拒绝';
-      if (err.name === 'NotFoundError') msg = '未找到摄像头';
-      if (err.name === 'NotReadableError') msg = '摄像头被占用';
-      setError(`启动失败：${msg}`);
-      setScanning(false);
+      // 显示块信息
+      setDecodedResult({
+        k: block.k,
+        bytes: block.bytes,
+        checksum: block.checksum,
+        indices: block.indices,
+        message: '手动输入成功（需要集成完整解码逻辑）',
+      })
+    } catch (e) {
+      alert('输入格式错误：' + (e as Error).message)
     }
-  };
+  }
 
-  // 切换摄像头（手动选择后重启）
-  const switchCamera = async (newCamId: string) => {
-    setCameraId(newCamId);
-    await stopScanner();
-    
-    setTimeout(async () => {
-      const qrReaderElement = document.getElementById('qr-reader');
-      if (!qrReaderElement) return;
-      qrReaderElement.innerHTML = '';
-      
-      try {
-        setScanning(true);
-        const scanner = new Html5Qrcode('qr-reader');
-        scannerRef.current = scanner;
-        await scanner.start(
-          newCamId,
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          (decodedText) => { handleDecode(decodedText); stopScanner(); },
-          () => {}
-        );
-      } catch (err: any) {
-        setError(`切换失败：${err.message}`);
-        setScanning(false);
-      }
-    }, 300);
-  };
-
-  const stopScanner = async () => {
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.stop();
-      } catch {}
-      scannerRef.current = null;
-      setScanning(false);
-    }
-  };
-
-  const handleDecode = (code: string) => {
-    setQrString(code);
-    try {
-      let decoded: any;
-      try { decoded = decodeQuestionnaire(code); }
-      catch { decoded = decodeQuestionnaire(decompress(code)); }
-
-      const answers: any = {};
-      const answerIds = Object.keys(decoded.answers).map(Number);
-      const template = findBestTemplate(answerIds);
-      
-      for (const [qid, answer] of Object.entries(decoded.answers)) {
-        const questionId = parseInt(qid);
-        const question = findQuestion(questionId);
-        if (!question) {
-          // 未知题目也显示原始数据，不跳过
-          answers[questionId] = {
-            question: { id: questionId, title: `题目 ${questionId}`, type: 'unknown', required: false },
-            answer,
-            displayText: formatAnswer(answer, { options: [] }),
-          };
-          continue;
-        }
-        answers[questionId] = {
-          question, answer,
-          displayText: formatAnswer(answer, question),
-        };
-      }
-      setDecodedData({ version: 'V2', patientInfo: decoded.patientInfo, answers, isValid: true });
-      setError('');
-    } catch (e: any) {
-      setError(e.message || '解码失败');
-      setDecodedData(null);
-    }
-  };
-
-  const formatAnswer = (answer: any, question: any): string => {
-    switch (answer.type) {
-      case 'single': return question.options?.find((o: any) => o.id === answer.value)?.label || answer.value;
-      case 'multiple': return answer.value.map((v: string) => question.options?.find((o: any) => o.id === v)?.label || v).join(', ');
-      case 'numeric': return `${answer.value}`;
-      case 'text': case 'long-text': return answer.value;
-      default: return '未知';
-    }
-  };
-
+  // 重置
   const handleReset = () => {
-    setQrString('');
-    setDecodedData(null);
-    setError('');
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setError('');
-    try {
-      if (!file.type.startsWith('image/')) throw new Error('请上传图片文件');
-      if (file.size > 5 * 1024 * 1024) throw new Error('图片大小不能超过 5MB');
-      const scanner = new Html5Qrcode('qr-reader-hidden');
-      const decodedText = await scanner.scanFile(file, true);
-      if (!decodedText) throw new Error('未在图片中找到二维码');
-      handleDecode(decodedText);
-    } catch (err: any) {
-      setError(err.message || '图片解析失败');
-      setDecodedData(null);
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
+    reset()
+    setDecodedResult(null)
+    setManualInput('')
+  }
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8">
+    <div className="min-h-screen bg-gradient-to-b from-green-50 to-white p-4 sm:p-6">
+      <div className="max-w-4xl mx-auto">
         {/* 头部 */}
-        <div className="mb-8">
-          <button onClick={() => router.push('/')} className="text-blue-600 hover:underline mb-4">
-            ← 返回首页
+        <header className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">
+            🏥 医院端 - 扫码解码
+          </h1>
+          <p className="text-gray-600">
+            使用摄像头扫描患者提供的二维码序列，或手动输入编码数据
+          </p>
+        </header>
+
+        {/* 模式切换 */}
+        <div className="flex gap-4 mb-6">
+          <button
+            onClick={() => setInputMode('camera')}
+            className={`flex-1 py-3 px-4 rounded-lg font-semibold transition ${
+              inputMode === 'camera'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            📷 摄像头扫描
           </button>
-          <h1 className="text-3xl font-bold text-gray-900">🏥 医院端扫码解码</h1>
-          <p className="text-gray-600 mt-2">扫码或输入二维码内容，还原问卷数据</p>
+          <button
+            onClick={() => setInputMode('manual')}
+            className={`flex-1 py-3 px-4 rounded-lg font-semibold transition ${
+              inputMode === 'manual'
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            ⌨️ 手动输入
+          </button>
         </div>
 
-        {/* 输入方式选择 */}
-        <div className="bg-white rounded-xl shadow p-6 mb-6">
-          <div className="flex flex-wrap gap-3 mb-6">
-            <button onClick={() => { setInputMode('input'); stopScanner(); }}
-              className={`px-4 py-2 rounded-lg font-medium ${inputMode === 'input' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-              📝 手动输入
-            </button>
-            <button onClick={() => setInputMode('scan')}
-              className={`px-4 py-2 rounded-lg font-medium ${inputMode === 'scan' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-              📷 摄像头扫码
-            </button>
-            <button onClick={() => { setInputMode('upload'); stopScanner(); }}
-              className={`px-4 py-2 rounded-lg font-medium ${inputMode === 'upload' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-              🖼️ 上传图片
-            </button>
-          </div>
-
-          {/* 手动输入 */}
-          {inputMode === 'input' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">二维码内容</label>
-              <textarea value={qrString} onChange={(e) => setQrString(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm" rows={4}
-                placeholder="粘贴或输入二维码编码字符串..." />
-              <div className="flex gap-4 mt-4">
-                <button onClick={() => handleDecode(qrString)}
-                  className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700">
-                  🔍 解码
-                </button>
-                <button onClick={handleReset}
-                  className="px-6 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300">
-                  🔄 重置
-                </button>
+        {/* 摄像头扫描模式 */}
+        {inputMode === 'camera' && (
+          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold text-gray-800">
+                摄像头扫描
+              </h2>
+              <div className="flex gap-2">
+                {!isScanning && !isComplete && (
+                  <button
+                    onClick={startScan}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                  >
+                    开始扫描
+                  </button>
+                )}
+                {isScanning && (
+                  <button
+                    onClick={stopScan}
+                    className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition"
+                  >
+                    暂停
+                  </button>
+                )}
+                {(isComplete || error) && (
+                  <button
+                    onClick={handleReset}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                  >
+                    重新开始
+                  </button>
+                )}
               </div>
             </div>
-          )}
 
-          {/* 摄像头扫码 */}
-          {inputMode === 'scan' && (
-            <div className="text-center py-4">
-              {!decodedData && !error && !scanning && (
-                <div className="py-8">
-                  <div className="text-6xl mb-4">📷</div>
-                  <p className="text-gray-600 mb-6">一键启动后置摄像头扫码</p>
-                  <button onClick={startScanner}
-                    className="px-8 py-4 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 text-lg">
-                    📷 启动摄像头扫码
-                  </button>
-                  <p className="text-sm text-gray-500 mt-4">
-                    💡 默认使用后置摄像头，自动尝试多种启动方式
+            {/* 视频区域 */}
+            <div className="relative bg-black rounded-lg overflow-hidden mb-4 aspect-video">
+              <video
+                ref={videoRef}
+                className="w-full h-full object-cover"
+                playsInline
+                muted
+              />
+              {!isScanning && !isComplete && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
+                  <p className="text-white text-lg">
+                    点击"开始扫描"启动摄像头
                   </p>
                 </div>
               )}
-
-              {/* 扫码画面 */}
-              {scanning && (
-                <div>
-                  {cameras.length > 1 && (
-                    <div className="mb-3 max-w-md mx-auto">
-                      <label className="text-sm text-gray-600 mr-2">切换摄像头：</label>
-                      <select value={cameraId} onChange={(e) => switchCamera(e.target.value)}
-                        className="px-3 py-1 border rounded-lg text-sm">
-                        {cameras.map((cam) => (
-                          <option key={cam.id} value={cam.id}>{cam.label || `摄像头 ${cam.id}`}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+              {isComplete && (
+                <div className="absolute inset-0 flex items-center justify-center bg-green-600 bg-opacity-80">
+                  <p className="text-white text-2xl font-bold">
+                    ✅ 解码完成！
+                  </p>
                 </div>
               )}
-              
-              {/* 扫码容器 - 始终存在 */}
-              <div className="mt-2">
-                <div id="qr-reader" className="max-w-md mx-auto" style={{ minHeight: scanning ? '300px' : '0' }}></div>
+            </div>
+
+            {/* 进度显示 */}
+            {isScanning && (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between text-sm text-gray-600 mb-1">
+                    <span>解码进度</span>
+                    <span>{progress.percent}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-4">
+                    <div
+                      className="bg-green-600 h-4 rounded-full transition-all duration-300"
+                      style={{ width: `${progress.percent}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <p className="text-xs text-gray-500">总块数</p>
+                    <p className="text-lg font-bold">{progress.total}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">已解码</p>
+                    <p className="text-lg font-bold text-green-600">{progress.decoded}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">已接收</p>
+                    <p className="text-lg font-bold text-blue-600">{progress.encoded}</p>
+                  </div>
+                </div>
+
+                <p className="text-sm text-gray-600 text-center">
+                  💡 喷泉码特性：无需按顺序扫描，任意帧都可解码
+                </p>
               </div>
-              
-              {scanning && (
-                <button onClick={stopScanner}
-                  className="mt-4 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
-                  ⏹️ 停止扫码
-                </button>
-              )}
-              {error && !scanning && (
-                <div>
-                  <div className="text-6xl mb-4">⚠️</div>
-                  <p className="text-red-600 mb-4 font-medium">{error}</p>
-                  <div className="text-sm text-gray-600 mb-6 max-w-md mx-auto">
-                    <p className="mb-2">💡 可能的原因：</p>
-                    <ul className="text-left space-y-1">
-                      <li>• 浏览器未授权摄像头权限</li>
-                      <li>• 没有可用的摄像头设备</li>
-                      <li>• 摄像头正在被其他应用使用</li>
-                      <li>• 需要 HTTPS 环境（Vercel 已支持）</li>
-                    </ul>
-                  </div>
-                  <div className="flex gap-4 justify-center flex-wrap">
-                    <button onClick={startScanner}
-                      className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                      🔄 重试摄像头
-                    </button>
-                    <button onClick={() => setInputMode('upload')}
-                      className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                      🖼️ 上传图片
-                    </button>
-                    <button onClick={() => setInputMode('input')}
-                      className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                      📝 手动输入
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+            )}
 
-          {/* 图片上传 */}
-          {inputMode === 'upload' && (
-            <div className="text-center py-8">
-              {!decodedData && !uploading && !error && (
-                <>
-                  <div className="text-6xl mb-4">🖼️</div>
-                  <p className="text-gray-600 mb-6">上传包含二维码的图片进行解析</p>
-                  <div onClick={() => fileInputRef.current?.click()}
-                    className="border-2 border-dashed border-gray-300 rounded-xl p-8 mb-4 cursor-pointer hover:border-blue-500">
-                    <div className="text-4xl mb-2">📤</div>
-                    <p className="text-gray-600 mb-2">点击选择图片</p>
-                    <p className="text-sm text-gray-500">支持 PNG、JPG 格式，最大 5MB</p>
-                  </div>
-                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                  <div className="text-sm text-gray-500">
-                    <p>💡 可以上传截图中的二维码</p>
-                  </div>
-                </>
-              )}
-              {uploading && (
-                <div>
-                  <div className="text-4xl mb-4">⏳</div>
-                  <p className="text-gray-600">正在解析图片...</p>
-                </div>
-              )}
-              {error && !uploading && !decodedData && (
-                <div>
-                  <div className="text-6xl mb-4">❌</div>
-                  <p className="text-red-600 mb-4">{error}</p>
-                  <button onClick={() => { setError(''); fileInputRef.current?.click(); }}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                    🔄 重新上传
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+            {/* 错误提示 */}
+            {error && (
+              <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-red-800 text-sm">❌ 错误：{error.message}</p>
+              </div>
+            )}
+          </div>
+        )}
 
-          {/* 隐藏的扫码器用于图片解析 */}
-          <div id="qr-reader-hidden" style={{ display: 'none' }}></div>
-        </div>
+        {/* 手动输入模式 */}
+        {inputMode === 'manual' && (
+          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              手动输入编码数据
+            </h2>
 
-        {/* 通用错误提示 */}
-        {error && inputMode === 'input' && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-red-600">❌ {error}</p>
+            <form onSubmit={handleManualSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Base64 编码数据
+                </label>
+                <textarea
+                  value={manualInput}
+                  onChange={(e) => setManualInput(e.target.value)}
+                  placeholder="粘贴 Base64 编码的二维码数据..."
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 font-mono text-sm"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={!manualInput.trim()}
+                className="w-full px-4 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                解析数据
+              </button>
+            </form>
           </div>
         )}
 
         {/* 解码结果 */}
-        {decodedData && decodedData.isValid && (
-          <div className="space-y-6">
-            <section className="bg-white rounded-xl shadow p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">👤 患者信息</h2>
-              <div className="grid md:grid-cols-3 gap-4">
-                <div>
-                  <div className="text-sm text-gray-500">患者 ID</div>
-                  <div className="text-lg font-medium text-gray-900">{decodedData.patientInfo.id || '-'}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-500">姓名</div>
-                  <div className="text-lg font-medium text-gray-900">{decodedData.patientInfo.name || '-'}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-500">年龄 / 性别</div>
-                  <div className="text-lg font-medium text-gray-900">
-                    {decodedData.patientInfo.age}岁 / {decodedData.patientInfo.gender === 'M' ? '男' : '女'}
-                  </div>
-                </div>
-              </div>
-            </section>
+        {decodedResult && (
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              ✅ 解码结果
+            </h2>
 
-            <section className="bg-white rounded-xl shadow p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">📋 问卷答案</h2>
-              <div className="space-y-4">
-                {Object.entries(decodedData.answers).map(([id, item]: [string, any]) => (
-                  <div key={id} className="border-b border-gray-200 pb-4 last:border-0">
-                    <div className="flex items-start gap-2 mb-2">
-                      <span className="font-medium text-gray-900">
-                        {item.question.id}. {item.question.title}
-                      </span>
-                      {item.question.required && <span className="text-red-500 text-sm">*</span>}
-                    </div>
-                    <div className="text-gray-700 bg-gray-50 rounded-lg px-3 py-2">
-                      {item.displayText || '未回答'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <div className="flex gap-4 justify-center flex-wrap">
-              <button onClick={() => alert('数据已保存至系统（模拟）')}
-                className="px-8 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700">
-                💾 保存至系统
-              </button>
-              <button onClick={handleReset}
-                className="px-8 py-3 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300">
-                🔄 继续扫码
-              </button>
+            <div className="bg-gray-50 rounded-lg p-4 overflow-auto max-h-96">
+              <pre className="text-sm text-gray-800 font-mono whitespace-pre-wrap">
+                {JSON.stringify(decodedResult, null, 2)}
+              </pre>
             </div>
-          </div>
-        )}
 
-        {!decodedData && !error && inputMode !== 'input' && !scanning && !uploading && (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">📱</div>
-            <p className="text-gray-600">请选择解码方式</p>
+            {/* 患者信息摘要 */}
+            {decodedResult.type === 'questionnaire' && decodedResult.answers && (
+              <div className="mt-6 space-y-4">
+                <h3 className="font-semibold text-gray-800">
+                  📋 问卷答案摘要
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {Object.entries(decodedResult.answers).map(([id, value]) => (
+                    <div key={id} className="bg-blue-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500 mb-1">问题 {id}</p>
+                      <p className="text-sm font-medium text-gray-800">
+                        {Array.isArray(value) ? value.join(', ') : String(value)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
-    </main>
-  );
+    </div>
+  )
 }
