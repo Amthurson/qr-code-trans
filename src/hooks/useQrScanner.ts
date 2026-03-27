@@ -15,7 +15,7 @@ interface UseQrScannerOptions {
 }
 
 interface UseQrScannerReturn {
-  videoRef: React.RefObject<HTMLVideoElement>
+  videoRef: React.RefObject<HTMLVideoElement | null>
   isScanning: boolean
   progress: {
     total: number
@@ -38,7 +38,7 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
     maxScansPerSecond = 30,
   } = options
 
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const [isScanning, setIsScanning] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
   const [decodedData, setDecodedData] = useState<Uint8Array | null>(null)

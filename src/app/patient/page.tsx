@@ -9,36 +9,28 @@ import { useState, useCallback } from 'react'
 import { useQrFountain } from '@/hooks/useQrFountain'
 import QrCodeDisplay from '@/components/QrCodeDisplay'
 import { scoliosisQuestionnaire } from '@/lib/questions'
-import type { QuestionnaireAnswers } from '@/types'
+import type { QuestionnaireAnswers, Answer } from '@/types'
 
 export default function PatientPage() {
-  const [answers, setAnswers] = useState<QuestionnaireAnswers | null>(null)
+  const [answers, setAnswers] = useState<Record<number, Answer>>({})
   const [generatedData, setGeneratedData] = useState<Uint8Array | null>(null)
 
   // 处理答案变化
-  const handleAnswerChange = useCallback((questionId: number, value: any) => {
-    setAnswers(prev => {
-      const currentAnswers = prev?.answers || {}
-      return {
-        patientInfo: prev?.patientInfo || { id: '', name: '', age: 0, gender: 'M' },
-        answers: {
-          ...currentAnswers,
-          [questionId]: value,
-        },
-      }
-    })
+  const handleAnswerChange = useCallback((questionId: number, value: Answer) => {
+    setAnswers(prev => ({
+      ...prev,
+      [questionId]: value,
+    }))
   }, [])
 
   // 生成问卷数据
   const generateQuestionnaireData = useCallback(() => {
-    if (!answers) return
-    
     // 将答案转换为 JSON 字符串
     const jsonData = JSON.stringify({
       version: '2.0',
       type: 'questionnaire',
       timestamp: Date.now(),
-      answers: answers.answers,
+      answers,
     })
 
     // 转换为 Uint8Array
@@ -65,7 +57,7 @@ export default function PatientPage() {
 
   // 计算容量状态
   const getCapacityStatus = () => {
-    if (!block) return { status: 'safe', text: '等待生成' }
+    if (!block) return { status: 'safe', text: '等待生成', color: 'text-gray-600' }
     
     // 估算压缩后大小
     const estimatedSize = totalBytes
@@ -79,6 +71,11 @@ export default function PatientPage() {
   }
 
   const capacityStatus = getCapacityStatus()
+
+  // 检查是否所有必填题都已回答
+  const allRequiredAnswered = scoliosisQuestionnaire.questions
+    .filter(q => q.required)
+    .every(q => answers[q.id] !== undefined)
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white p-4 sm:p-6">
@@ -103,20 +100,20 @@ export default function PatientPage() {
             {scoliosisQuestionnaire.questions.map((question) => (
               <div key={question.id} className="border-b pb-4 last:border-0">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {question.id}. {question.text}
+                  {question.id}. {question.title}
                   {question.required && <span className="text-red-500 ml-1">*</span>}
                 </label>
 
                 {question.type === 'single' && (
                   <div className="space-y-2">
                     {question.options?.map((option) => (
-                      <label key={option.value} className="flex items-center">
+                      <label key={option.id} className="flex items-center">
                         <input
                           type="radio"
                           name={`q${question.id}`}
-                          value={option.value}
-                          checked={answers[question.id] === option.value}
-                          onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+                          value={option.id}
+                          checked={answers[question.id]?.type === 'single' && answers[question.id].value === option.id}
+                          onChange={() => handleAnswerChange(question.id, { type: 'single', value: option.id })}
                           className="h-4 w-4 text-blue-600"
                         />
                         <span className="ml-2 text-gray-700">{option.label}</span>
@@ -127,41 +124,56 @@ export default function PatientPage() {
 
                 {question.type === 'multiple' && (
                   <div className="space-y-2">
-                    {question.options?.map((option) => (
-                      <label key={option.value} className="flex items-center">
-                        <input
-                          type="checkbox"
-                          value={option.value}
-                          checked={(answers[question.id] as string[])?.includes(option.value)}
-                          onChange={(e) => {
-                            const current = (answers[question.id] as string[]) || []
-                            const next = e.target.checked
-                              ? [...current, e.target.value]
-                              : current.filter(v => v !== e.target.value)
-                            handleAnswerChange(question.id, next)
-                          }}
-                          className="h-4 w-4 text-blue-600 rounded"
-                        />
-                        <span className="ml-2 text-gray-700">{option.label}</span>
-                      </label>
-                    ))}
+                    {question.options?.map((option) => {
+                      const currentValue = answers[question.id]
+                      const isSelected = currentValue?.type === 'multiple' && currentValue.value.includes(option.id)
+                      
+                      return (
+                        <label key={option.id} className="flex items-center">
+                          <input
+                            type="checkbox"
+                            value={option.id}
+                            checked={isSelected}
+                            onChange={(e) => {
+                              const current = (currentValue?.type === 'multiple' ? currentValue.value : [])
+                              const next = e.target.checked
+                                ? [...current, option.id]
+                                : current.filter(v => v !== option.id)
+                              handleAnswerChange(question.id, { 
+                                type: 'multiple', 
+                                value: next,
+                                strategy: 'list',
+                              })
+                            }}
+                            className="h-4 w-4 text-blue-600 rounded"
+                          />
+                          <span className="ml-2 text-gray-700">{option.label}</span>
+                        </label>
+                      )
+                    })}
                   </div>
                 )}
 
                 {question.type === 'numeric' && (
                   <input
                     type="number"
-                    value={answers[question.id] || ''}
-                    onChange={(e) => handleAnswerChange(question.id, parseFloat(e.target.value))}
-                    placeholder={`请输入${question.unit || '数值'}`}
+                    value={(answers[question.id]?.type === 'numeric' ? answers[question.id].value : '') as number}
+                    onChange={(e) => handleAnswerChange(question.id, { 
+                      type: 'numeric', 
+                      value: parseFloat(e.target.value) || 0,
+                    })}
+                    placeholder={`请输入${'数值'}`}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 )}
 
                 {question.type === 'text' && (
                   <textarea
-                    value={answers[question.id] || ''}
-                    onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+                    value={(answers[question.id]?.type === 'text' ? answers[question.id].value : '') as string}
+                    onChange={(e) => handleAnswerChange(question.id, { 
+                      type: 'text', 
+                      value: e.target.value,
+                    })}
                     placeholder="请输入回答"
                     rows={3}
                     maxLength={question.maxLength || 200}
@@ -169,10 +181,13 @@ export default function PatientPage() {
                   />
                 )}
 
-                {question.type === 'long_text' && (
+                {question.type === 'long-text' && (
                   <textarea
-                    value={answers[question.id] || ''}
-                    onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+                    value={(answers[question.id]?.type === 'long-text' ? answers[question.id].value : '') as string}
+                    onChange={(e) => handleAnswerChange(question.id, { 
+                      type: 'long-text', 
+                      value: e.target.value,
+                    })}
                     placeholder="请详细描述"
                     rows={5}
                     maxLength={question.maxLength || 500}
@@ -181,9 +196,11 @@ export default function PatientPage() {
                 )}
 
                 {/* 字数统计 */}
-                {(question.type === 'text' || question.type === 'long_text') && (
+                {(question.type === 'text' || question.type === 'long-text') && (
                   <p className="text-xs text-gray-500 mt-1 text-right">
-                    {String(answers[question.id] || '').length} / {question.maxLength || 200}
+                    {String(answers[question.id]?.type === 'text' || answers[question.id]?.type === 'long-text' 
+                      ? answers[question.id].value 
+                      : '').length} / {question.maxLength || 200}
                   </p>
                 )}
               </div>
@@ -194,7 +211,7 @@ export default function PatientPage() {
           <div className="mt-6 flex justify-end">
             <button
               onClick={generateQuestionnaireData}
-              disabled={!answers || Object.keys(answers.answers).length < scoliosisQuestionnaire.questions.filter(q => q.required).length}
+              disabled={!allRequiredAnswered}
               className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
               生成二维码

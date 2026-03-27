@@ -5,7 +5,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { renderSVG, renderCanvas } from 'uqr'
+import { renderSVG } from 'uqr'
 
 interface QrCodeDisplayProps {
   data: string // Base64 编码的数据
@@ -34,7 +34,6 @@ export default function QrCodeDisplay({
       // 使用 uqr 渲染 SVG
       const svgString = renderSVG(data, {
         border,
-        scale: size / 24, // uqr 默认 24x24 模块
       })
       setSvg(svgString)
       setError(null)
