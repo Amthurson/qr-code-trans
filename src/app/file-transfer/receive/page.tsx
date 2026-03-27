@@ -28,26 +28,7 @@ export default function FileTransferReceivePage() {
   const processedCodesRef = useRef<Set<string>>(new Set())
   const metaExtractedRef = useRef(false)
 
-  const {
-    videoRef,
-    isScanning,
-    progress,
-    decodedData,
-    error,
-    startScan,
-    stopScan,
-    reset,
-  } = useQrScanner({
-    onDecoded: handleDecoded,
-    maxScansPerSecond: 30,
-  })
-
-  // 初始化解码器
-  if (!decoderRef.current) {
-    decoderRef.current = createDecoder()
-  }
-
-  // 处理解码完成
+  // 处理解码完成（移到 useQrScanner 之前定义）
   const handleDecoded = useCallback((data: Uint8Array) => {
     try {
       // 提取元数据 [metaLength(4)][meta][fileData]
@@ -72,6 +53,25 @@ export default function FileTransferReceivePage() {
       console.error('解析文件失败:', e)
     }
   }, [])
+
+  // 初始化解码器
+  if (!decoderRef.current) {
+    decoderRef.current = createDecoder()
+  }
+
+  const {
+    videoRef,
+    isScanning,
+    progress,
+    decodedData,
+    error,
+    startScan,
+    stopScan,
+    reset,
+  } = useQrScanner({
+    onDecoded: handleDecoded,
+    maxScansPerSecond: 30,
+  })
 
   // 处理手动输入
   const handleManualSubmit = (e: React.FormEvent) => {
