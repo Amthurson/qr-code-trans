@@ -309,8 +309,69 @@ export default function FileTransferReceivePage() {
           </div>
         )}
 
-        {/* 文件信息 */}
-        {fileMeta && (
+        {/* 完成状态显示 */}
+        {isComplete && (
+          <div className="bg-green-50 border-2 border-green-200 rounded-xl p-6 mb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="text-4xl">✅</div>
+              <div>
+                <h2 className="text-xl font-bold text-green-800">文件接收完成！</h2>
+                <p className="text-sm text-green-600">可以下载文件了</p>
+              </div>
+            </div>
+            
+            {fileMeta ? (
+              <div>
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <p className="text-sm text-gray-500">文件名</p>
+                    <p className="font-medium text-gray-800 truncate">{fileMeta.filename}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">文件类型</p>
+                    <p className="font-medium text-gray-800">{fileMeta.contentType}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">文件大小</p>
+                    <p className="font-medium text-gray-800">
+                      {(fileMeta.size / 1024).toFixed(2)} KB
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">修改时间</p>
+                    <p className="font-medium text-gray-800">
+                      {new Date(fileMeta.lastModified).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 下载按钮 */}
+                <button
+                  onClick={handleDownload}
+                  disabled={!downloadUrl}
+                  className="w-full px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span>⬇️</span>
+                  <span>{downloadUrl ? '下载文件' : '准备下载中...'}</span>
+                </button>
+                
+                {!downloadUrl && (
+                  <p className="text-sm text-yellow-600 mt-2 text-center">
+                    正在处理文件，请稍候...
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-lg text-green-800 mb-4">正在处理文件数据...</p>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 文件信息（兼容旧显示） */}
+        {fileMeta && !isComplete && (
           <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
             <h2 className="text-xl font-semibold text-gray-800 mb-4">
               📄 文件信息
