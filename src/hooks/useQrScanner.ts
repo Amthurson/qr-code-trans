@@ -4,9 +4,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import QrScanner from 'qr-scanner'
-import { createDecoder, type LtDecoder } from './lt-decoder'
-import type { EncodedBlock } from './lt-encoder'
-import { binaryToBlock, fromBase64 } from './lt-encoder'
+import { createDecoder, type LtDecoder } from '../lib/lt-decoder'
+import type { EncodedBlock } from '../lib/lt-encoder'
+import { binaryToBlock, fromBase64 } from '../lib/lt-encoder'
 
 interface UseQrScannerOptions {
   onDecoded?: (data: Uint8Array) => void

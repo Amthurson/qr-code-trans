@@ -8,7 +8,7 @@
 import { useState, useCallback } from 'react'
 import { useQrFountain } from '@/hooks/useQrFountain'
 import QrCodeDisplay from '@/components/QrCodeDisplay'
-import { questions } from '@/lib/questions'
+import { scoliosisQuestionnaire } from '@/lib/questions'
 import type { QuestionnaireAnswers } from '@/types'
 
 export default function PatientPage() {
@@ -92,7 +92,7 @@ export default function PatientPage() {
           </h2>
 
           <div className="space-y-6">
-            {questions.map((question) => (
+            {scoliosisQuestionnaire.questions.map((question) => (
               <div key={question.id} className="border-b pb-4 last:border-0">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   {question.id}. {question.text}
@@ -186,7 +186,7 @@ export default function PatientPage() {
           <div className="mt-6 flex justify-end">
             <button
               onClick={generateQuestionnaireData}
-              disabled={Object.keys(answers).length < questions.filter(q => q.required).length}
+              disabled={Object.keys(answers).length < scoliosisQuestionnaire.questions.filter(q => q.required).length}
               className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
               生成二维码

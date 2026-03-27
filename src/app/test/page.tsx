@@ -6,7 +6,8 @@
 'use client'
 
 import { useState } from 'react'
-import { createEncoder, createDecoder, blockToBinary, toBase64, fromBase64, binaryToBlock } from '@/lib/lt-encoder'
+import { createEncoder, blockToBinary, toBase64, fromBase64, binaryToBlock } from '@/lib/lt-encoder'
+import { createDecoder } from '@/lib/lt-decoder'
 import QrCodeDisplay from '@/components/QrCodeDisplay'
 
 export default function TestPage() {

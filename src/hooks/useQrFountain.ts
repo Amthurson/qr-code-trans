@@ -3,8 +3,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { createEncoder, blockToBinary, toBase64, type LtEncoder } from './lt-encoder'
-import type { EncodedBlock } from './lt-encoder'
+import { createEncoder, blockToBinary, toBase64, type LtEncoder } from '../lib/lt-encoder'
+import type { EncodedBlock } from '../lib/lt-encoder'
 
 interface UseQrFountainOptions {
   data: Uint8Array | string

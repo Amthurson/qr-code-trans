@@ -83,10 +83,10 @@ export default function Home() {
               极限测试
             </h2>
             <p className="text-sm text-gray-600 mb-3">
-              40题容量压测
+              40 题容量压测
             </p>
             <ul className="text-xs text-gray-500 space-y-1">
-              <li>✓ 40题全填满</li>
+              <li>✓ 40 题全填满</li>
               <li>✓ 编码策略分析</li>
               <li>✓ 容量极限测试</li>
             </ul>
@@ -100,7 +100,9 @@ export default function Home() {
             className="block max-w-2xl mx-auto p-8 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 text-white"
           >
             <div className="text-5xl mb-4">📦</div>
-            <h2 className="text-2xl font-bold mb-3">离线文件传输</h2>
+            <h2 className="text-2xl font-bold mb-3">
+              离线文件传输
+            </h2>
             <p className="text-indigo-100 mb-4">
               支持任意文件类型，通过二维码序列传输
             </p>
@@ -110,22 +112,6 @@ export default function Home() {
               <div>✓ 连续扫码传输</div>
               <div>✓ CRC32 校验保护</div>
             </div>
-          </Link>
-        </div>
-          >
-            <div className="text-6xl mb-4">📦</div>
-            <h2 className="text-2xl font-bold text-white mb-2">
-              离线文件传输
-            </h2>
-            <p className="text-indigo-100">
-              支持任意文件类型，通过二维码序列传输
-            </p>
-            <ul className="text-xs text-indigo-200 space-y-1 mt-3">
-              <li>✓ 任意文件格式</li>
-              <li>✓ 自动分片编码</li>
-              <li>✓ 连续扫码传输</li>
-              <li>✓ CRC32 校验保护</li>
-            </ul>
           </Link>
         </div>
 

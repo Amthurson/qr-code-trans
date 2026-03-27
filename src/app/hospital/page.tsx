@@ -7,7 +7,7 @@
 
 import { useState, useRef } from 'react'
 import { useQrScanner } from '@/hooks/useQrScanner'
-import { fromBase64, binaryToBlock } from '@/hooks/lt-encoder'
+import { fromBase64, binaryToBlock } from '@/lib/lt-encoder'
 
 export default function HospitalPage() {
   const [manualInput, setManualInput] = useState('')
