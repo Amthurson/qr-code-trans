@@ -12,25 +12,33 @@ import { scoliosisQuestionnaire } from '@/lib/questions'
 import type { QuestionnaireAnswers } from '@/types'
 
 export default function PatientPage() {
-  const [answers, setAnswers] = useState<QuestionnaireAnswers>({})
+  const [answers, setAnswers] = useState<QuestionnaireAnswers | null>(null)
   const [generatedData, setGeneratedData] = useState<Uint8Array | null>(null)
 
   // 处理答案变化
   const handleAnswerChange = useCallback((questionId: number, value: any) => {
-    setAnswers(prev => ({
-      ...prev,
-      [questionId]: value,
-    }))
+    setAnswers(prev => {
+      const currentAnswers = prev?.answers || {}
+      return {
+        patientInfo: prev?.patientInfo || { id: '', name: '', age: 0, gender: 'M' },
+        answers: {
+          ...currentAnswers,
+          [questionId]: value,
+        },
+      }
+    })
   }, [])
 
   // 生成问卷数据
   const generateQuestionnaireData = useCallback(() => {
+    if (!answers) return
+    
     // 将答案转换为 JSON 字符串
     const jsonData = JSON.stringify({
       version: '2.0',
       type: 'questionnaire',
       timestamp: Date.now(),
-      answers,
+      answers: answers.answers,
     })
 
     // 转换为 Uint8Array
@@ -186,7 +194,7 @@ export default function PatientPage() {
           <div className="mt-6 flex justify-end">
             <button
               onClick={generateQuestionnaireData}
-              disabled={Object.keys(answers).length < scoliosisQuestionnaire.questions.filter(q => q.required).length}
+              disabled={!answers || Object.keys(answers.answers).length < scoliosisQuestionnaire.questions.filter(q => q.required).length}
               className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
               生成二维码
