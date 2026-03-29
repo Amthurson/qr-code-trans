@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { renderSVG } from 'uqr'
 
 interface QrCodeDisplayProps {

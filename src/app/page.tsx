@@ -4,14 +4,14 @@ import Link from 'next/link';
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <main className="min-h-screen bg-gradient-to-br from-sky-50 via-indigo-50 to-slate-100">
       <div className="container mx-auto px-4 py-16">
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-900 mb-4">
             📋 离线问卷二维码传输系统
           </h1>
           <p className="text-xl text-gray-600">
-            患者填写问卷 → 编码压缩 → 生成二维码 → 医院扫码 → 解码还原
+            院内发放 → 公网填写 → 脱敏回传 → 超量走喷泉码
           </p>
         </div>
 
@@ -26,12 +26,12 @@ export default function Home() {
               患者端
             </h2>
             <p className="text-sm text-gray-600 mb-3">
-              填写问卷，生成二维码
+              解析 ticket，填写后生成回传码
             </p>
             <ul className="text-xs text-gray-500 space-y-1">
-              <li>✓ 支持多种题型</li>
-              <li>✓ 实时体积计算</li>
-              <li>✓ 自动编码压缩</li>
+              <li>✓ 脱敏 exchange/mask 上下文</li>
+              <li>✓ 单码/喷泉码自动切换</li>
+              <li>✓ 直接展示回传 token</li>
             </ul>
           </Link>
 
@@ -64,12 +64,12 @@ export default function Home() {
               问卷二维码
             </h2>
             <p className="text-sm text-gray-600 mb-3">
-              生成链接，微信扫码
+              模拟 PMS 发放码与公网入口
             </p>
             <ul className="text-xs text-gray-500 space-y-1">
-              <li>✓ 生成问卷链接</li>
-              <li>✓ 微信扫码填写</li>
-              <li>✓ 分享功能</li>
+              <li>✓ 生成 issue envelope</li>
+              <li>✓ 二维码内只放公网链接</li>
+              <li>✓ 联调测试域名</li>
             </ul>
           </Link>
 
@@ -123,25 +123,25 @@ export default function Home() {
           <div className="grid md:grid-cols-3 gap-6">
             <div className="text-center p-6">
               <div className="text-4xl mb-3">🔒</div>
-              <h4 className="font-semibold text-gray-900 mb-2">完全离线</h4>
-              <p className="text-sm text-gray-600">
-                无需网络连接，数据通过二维码安全传输
-              </p>
-            </div>
+            <h4 className="font-semibold text-gray-900 mb-2">完全离线</h4>
+            <p className="text-sm text-gray-600">
+                院内与公网解耦，答案最终通过二维码脱敏回院
+            </p>
+          </div>
             <div className="text-center p-6">
               <div className="text-4xl mb-3">📦</div>
-              <h4 className="font-semibold text-gray-900 mb-2">高效压缩</h4>
-              <p className="text-sm text-gray-600">
-                LZ 压缩 + 智能编码，75%+ 压缩率
-              </p>
-            </div>
+            <h4 className="font-semibold text-gray-900 mb-2">高效压缩</h4>
+            <p className="text-sm text-gray-600">
+                Deflate + Base64URL，单码超限时切喷泉码
+            </p>
+          </div>
             <div className="text-center p-6">
               <div className="text-4xl mb-3">📊</div>
-              <h4 className="font-semibold text-gray-900 mb-2">实时反馈</h4>
-              <p className="text-sm text-gray-600">
-                体积计算、容量预警、字数限制
-              </p>
-            </div>
+            <h4 className="font-semibold text-gray-900 mb-2">实时反馈</h4>
+            <p className="text-sm text-gray-600">
+                体积估算、预计帧数、回传模式一屏可见
+            </p>
+          </div>
           </div>
         </div>
 

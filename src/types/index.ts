@@ -143,6 +143,41 @@ export interface QuestionnaireTemplate {
   questions: Question[];
 }
 
+export type OfflineTransportMode = 'single' | 'fountain';
+
+export interface OfflineIssuePayload {
+  version: 'OQX/1';
+  transport: 'public-link';
+  exchangeId: string;
+  maskUuid: string;
+  bundleId: string;
+  templateIds: string[];
+}
+
+export interface OfflineAnswerEntry {
+  templateId: string;
+  questionId: number;
+  questionType: QuestionType;
+  value: string | number | string[];
+}
+
+export interface OfflineImportPayload {
+  version: 'OQX/1';
+  transport: 'offline-answer';
+  exchangeId: string;
+  maskUuid: string;
+  answerSheetId: string;
+  templateIds: string[];
+  answers: OfflineAnswerEntry[];
+}
+
+export interface OfflineQuestionnaireBundle {
+  id: string;
+  name: string;
+  description: string;
+  templateIds: string[];
+}
+
 // 容量限制常量
 export const CAPACITY_LIMITS = {
   SAFE: 1500,

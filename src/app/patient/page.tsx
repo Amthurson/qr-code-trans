@@ -1,283 +1,332 @@
-/**
- * 患者端 - 填写问卷并生成喷泉码二维码
- * 基于 Qrs 项目的 Luby Transform 实现
- */
+'use client';
 
-'use client'
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import QrCodeDisplay from '@/components/QrCodeDisplay';
+import { useQrFountain } from '@/hooks/useQrFountain';
+import {
+  buildOfflineImportEnvelope,
+  buildOfflineIssueEnvelope,
+  parseOfflineIssueTicket,
+  serializeOfflineAnswers,
+} from '@/lib/offline-questionnaire';
+import { findBundleById, resolveTemplates } from '@/lib/questions';
+import type { Answer, OfflineIssuePayload, Question, QuestionnaireTemplate } from '@/types';
 
-import { useState, useCallback } from 'react'
-import { useQrFountain } from '@/hooks/useQrFountain'
-import QrCodeDisplay from '@/components/QrCodeDisplay'
-import { scoliosisQuestionnaire } from '@/lib/questions'
-import type { QuestionnaireAnswers, Answer } from '@/types'
+const DEFAULT_ORIGIN = 'https://qr-trans.test.conova.withinfuel.com';
+const DEFAULT_BUNDLE = 'STUDIO-QUESTIONNAIRE-BUNDLE';
+const DEFAULT_TEMPLATE = ['scoliosis-v1'];
+
+function keyOf(templateId: string, questionId: number): string {
+  return `${templateId}:${questionId}`;
+}
+
+function isFilled(answer?: Answer): boolean {
+  if (!answer) return false;
+  if (answer.type === 'multiple') return answer.value.length > 0;
+  if (answer.type === 'text' || answer.type === 'long-text') return answer.value.trim().length > 0;
+  return true;
+}
+
+function placeholderOf(question: Question): string {
+  if (question.placeholder) return question.placeholder;
+  if (question.type === 'numeric') return '请输入数值';
+  return question.type === 'long-text' ? '请详细描述' : '请输入回答';
+}
+
+function modeText(mode: 'single' | 'fountain'): string {
+  return mode === 'single' ? '单码回传' : '喷泉码回传';
+}
 
 export default function PatientPage() {
-  const [answers, setAnswers] = useState<Record<number, Answer>>({})
-  const [generatedData, setGeneratedData] = useState<Uint8Array | null>(null)
+  const searchParams = useSearchParams();
+  const ticket = searchParams.get('ticket') || '';
+  const bundleId = searchParams.get('bundleId') || DEFAULT_BUNDLE;
+  const templateIds = (searchParams.get('template') || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const fallbackTemplateIds = templateIds.length > 0 ? templateIds : DEFAULT_TEMPLATE;
 
-  // 处理答案变化
-  const handleAnswerChange = useCallback((questionId: number, value: Answer) => {
-    setAnswers(prev => ({
-      ...prev,
-      [questionId]: value,
-    }))
-  }, [])
+  const [origin, setOrigin] = useState(DEFAULT_ORIGIN);
+  const [previewIssue, setPreviewIssue] = useState(() => buildOfflineIssueEnvelope({
+    bundleId,
+    templateIds: fallbackTemplateIds,
+    publicBaseUrl: `${DEFAULT_ORIGIN}/patient`,
+  }));
+  const [answers, setAnswers] = useState<Record<string, Answer>>({});
+  const [submission, setSubmission] = useState<ReturnType<typeof buildOfflineImportEnvelope> | null>(null);
 
-  // 生成问卷数据
-  const generateQuestionnaireData = useCallback(() => {
-    // 将答案转换为 JSON 字符串
-    const jsonData = JSON.stringify({
-      version: '2.0',
-      type: 'questionnaire',
-      timestamp: Date.now(),
-      answers,
-    })
+  useEffect(() => {
+    if (typeof window !== 'undefined') setOrigin(window.location.origin);
+  }, []);
 
-    // 转换为 Uint8Array
-    const data = new TextEncoder().encode(jsonData)
-    setGeneratedData(data)
-  }, [answers])
+  useEffect(() => {
+    setPreviewIssue(buildOfflineIssueEnvelope({
+      bundleId,
+      templateIds: fallbackTemplateIds,
+      publicBaseUrl: `${origin}/patient`,
+    }));
+  }, [bundleId, fallbackTemplateIds.join(','), origin]);
 
-  // 使用喷泉码生成二维码
-  const {
-    qrData,
-    block,
-    count,
-    fps,
-    bitrate,
-    totalBytes,
-    isReady,
-    error,
-  } = useQrFountain({
-    data: generatedData || '',
-    sliceSize: 1000,
-    compress: true,
-    fps: 20,
-  })
+  let issue: OfflineIssuePayload = previewIssue.issuePayload;
+  let issueError = '';
+  let issueWarning = '当前为本地预览会话，可直接联调公网填写页。';
+  let source = 'preview';
 
-  // 计算容量状态
-  const getCapacityStatus = () => {
-    if (!block) return { status: 'safe', text: '等待生成', color: 'text-gray-600' }
-    
-    // 估算压缩后大小
-    const estimatedSize = totalBytes
-    if (estimatedSize < 1500) {
-      return { status: 'safe', text: '🟢 安全', color: 'text-green-600' }
-    } else if (estimatedSize < 2200) {
-      return { status: 'warning', text: '🟡 警告', color: 'text-yellow-600' }
-    } else {
-      return { status: 'danger', text: '🔴 超限', color: 'text-red-600' }
+  if (ticket) {
+    try {
+      issue = parseOfflineIssueTicket(ticket);
+      issueWarning = '';
+      source = 'ticket';
+    } catch (error) {
+      issueError = error instanceof Error ? error.message : '发放码解析失败';
+      issueWarning = '已回退到本地预览问卷。';
     }
   }
 
-  const capacityStatus = getCapacityStatus()
+  const bundle = findBundleById(issue.bundleId);
+  const resolvedTemplateIds = issue.templateIds.length > 0
+    ? issue.templateIds
+    : bundle?.templateIds?.length
+      ? bundle.templateIds
+      : fallbackTemplateIds;
+  const templates = resolveTemplates(resolvedTemplateIds);
+  const missingTemplates = resolvedTemplateIds.filter((id) => !templates.find((item) => item.id === id));
+  const requiredTotal = templates.reduce((sum, template) => sum + template.questions.filter((item) => item.required).length, 0);
+  const requiredDone = templates.reduce((sum, template) => sum + template.questions.filter((question) => {
+    return question.required && isFilled(answers[keyOf(template.id, question.id)]);
+  }).length, 0);
+  const canSubmit = templates.length > 0 && requiredTotal > 0 && requiredTotal === requiredDone;
 
-  // 检查是否所有必填题都已回答
-  const allRequiredAnswered = scoliosisQuestionnaire.questions
-    .filter(q => q.required)
-    .every(q => answers[q.id] !== undefined)
+  useEffect(() => {
+    setAnswers({});
+    setSubmission(null);
+  }, [issue.exchangeId, issue.maskUuid, resolvedTemplateIds.join(',')]);
+
+  const fountain = useQrFountain({
+    data: submission?.mode === 'fountain' ? submission.token : '',
+    compress: false,
+    sliceSize: 900,
+    fps: 12,
+  });
+
+  const updateAnswer = (templateId: string, questionId: number, answer?: Answer) => {
+    const answerKey = keyOf(templateId, questionId);
+    setAnswers((current) => {
+      if (!answer) {
+        const next = { ...current };
+        delete next[answerKey];
+        return next;
+      }
+      return { ...current, [answerKey]: answer };
+    });
+    setSubmission(null);
+  };
+
+  const answerEntries = serializeOfflineAnswers(answers);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white p-4 sm:p-6">
-      <div className="max-w-4xl mx-auto">
-        {/* 头部 */}
-        <header className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">
-            👤 患者端 - 问卷填写
-          </h1>
-          <p className="text-gray-600">
-            填写问卷后，系统将生成二维码序列，医院扫码即可还原数据
-          </p>
-        </header>
+    <main className="min-h-screen bg-slate-50 px-4 py-8">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <section className="rounded-3xl bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-3xl">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">offline public fill</div>
+              <h1 className="mt-2 text-3xl font-bold text-slate-900">公网患者填写页</h1>
+              <p className="mt-3 text-sm leading-7 text-slate-600">
+                院内仅发放脱敏问卷票据，患者在公网填写，完成后生成 `offline-answer` 回传码。
+              </p>
+            </div>
+            <div className="grid min-w-[260px] gap-3 rounded-2xl bg-slate-950 p-4 text-sm text-slate-200">
+              <div>来源：{source === 'ticket' ? '院内发放码' : '本地预览'}</div>
+              <div>bundleId：<span className="font-mono">{issue.bundleId}</span></div>
+              <div>exchangeId：<span className="font-mono break-all">{issue.exchangeId}</span></div>
+              <div>maskUuid：<span className="font-mono break-all">{issue.maskUuid}</span></div>
+              <div>模板：{resolvedTemplateIds.join(', ')}</div>
+            </div>
+          </div>
+          {(issueError || issueWarning || missingTemplates.length > 0) && (
+            <div className="mt-4 space-y-2 text-sm">
+              {issueError && <div className="rounded-2xl bg-rose-50 px-4 py-3 text-rose-700">发放码解析失败：{issueError}</div>}
+              {issueWarning && <div className="rounded-2xl bg-amber-50 px-4 py-3 text-amber-700">{issueWarning}</div>}
+              {missingTemplates.length > 0 && (
+                <div className="rounded-2xl bg-slate-100 px-4 py-3 text-slate-700">
+                  本地镜像缺少模板：{missingTemplates.join(', ')}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
 
-        {/* 问卷表单 */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">
-            📋 脊柱侧弯预问诊问卷
-          </h2>
-
-          <div className="space-y-6">
-            {scoliosisQuestionnaire.questions.map((question) => (
-              <div key={question.id} className="border-b pb-4 last:border-0">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {question.id}. {question.title}
-                  {question.required && <span className="text-red-500 ml-1">*</span>}
-                </label>
-
-                {question.type === 'single' && (
-                  <div className="space-y-2">
-                    {question.options?.map((option) => (
-                      <label key={option.id} className="flex items-center">
-                        <input
-                          type="radio"
-                          name={`q${question.id}`}
-                          value={option.id}
-                          checked={answers[question.id]?.type === 'single' && answers[question.id].value === option.id}
-                          onChange={() => handleAnswerChange(question.id, { type: 'single', value: option.id })}
-                          className="h-4 w-4 text-blue-600"
-                        />
-                        <span className="ml-2 text-gray-700">{option.label}</span>
-                      </label>
-                    ))}
+        <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
+          <section className="space-y-6">
+            {templates.map((template: QuestionnaireTemplate) => (
+              <div key={template.id} className="rounded-3xl bg-white p-6 shadow-sm">
+                <div className="mb-5 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-900">{template.name}</h2>
+                    <p className="mt-1 text-sm text-slate-500">templateId: {template.id}</p>
                   </div>
-                )}
-
-                {question.type === 'multiple' && (
-                  <div className="space-y-2">
-                    {question.options?.map((option) => {
-                      const currentValue = answers[question.id]
-                      const isSelected = currentValue?.type === 'multiple' && currentValue.value.includes(option.id)
-                      
-                      return (
-                        <label key={option.id} className="flex items-center">
-                          <input
-                            type="checkbox"
-                            value={option.id}
-                            checked={isSelected}
-                            onChange={(e) => {
-                              const current = (currentValue?.type === 'multiple' ? currentValue.value : [])
-                              const next = e.target.checked
-                                ? [...current, option.id]
-                                : current.filter(v => v !== option.id)
-                              handleAnswerChange(question.id, { 
-                                type: 'multiple', 
-                                value: next,
-                                strategy: 'list',
-                              })
-                            }}
-                            className="h-4 w-4 text-blue-600 rounded"
-                          />
-                          <span className="ml-2 text-gray-700">{option.label}</span>
+                  <div className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{template.questions.length} 题</div>
+                </div>
+                <div className="space-y-4">
+                  {template.questions.map((question) => {
+                    const answer = answers[keyOf(template.id, question.id)];
+                    return (
+                      <div key={keyOf(template.id, question.id)} className="rounded-2xl border border-slate-200 p-4">
+                        <label className="mb-3 block text-sm font-semibold text-slate-900">
+                          {question.id}. {question.title}
+                          {question.required && <span className="ml-1 text-rose-500">*</span>}
                         </label>
-                      )
-                    })}
-                  </div>
-                )}
-
-                {question.type === 'numeric' && (
-                  <input
-                    type="number"
-                    value={(answers[question.id]?.type === 'numeric' ? answers[question.id].value : '') as number}
-                    onChange={(e) => handleAnswerChange(question.id, { 
-                      type: 'numeric', 
-                      value: parseFloat(e.target.value) || 0,
-                    })}
-                    placeholder={`请输入${'数值'}`}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                )}
-
-                {question.type === 'text' && (
-                  <textarea
-                    value={(answers[question.id]?.type === 'text' ? answers[question.id].value : '') as string}
-                    onChange={(e) => handleAnswerChange(question.id, { 
-                      type: 'text', 
-                      value: e.target.value,
-                    })}
-                    placeholder="请输入回答"
-                    rows={3}
-                    maxLength={question.maxLength || 200}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                )}
-
-                {question.type === 'long-text' && (
-                  <textarea
-                    value={(answers[question.id]?.type === 'long-text' ? answers[question.id].value : '') as string}
-                    onChange={(e) => handleAnswerChange(question.id, { 
-                      type: 'long-text', 
-                      value: e.target.value,
-                    })}
-                    placeholder="请详细描述"
-                    rows={5}
-                    maxLength={question.maxLength || 500}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                )}
-
-                {/* 字数统计 */}
-                {(question.type === 'text' || question.type === 'long-text') && (
-                  <p className="text-xs text-gray-500 mt-1 text-right">
-                    {String(answers[question.id]?.type === 'text' || answers[question.id]?.type === 'long-text' 
-                      ? answers[question.id].value 
-                      : '').length} / {question.maxLength || 200}
-                  </p>
-                )}
+                        {question.type === 'single' && (
+                          <div className="space-y-2">
+                            {question.options?.map((option) => (
+                              <label key={option.id} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                <input
+                                  type="radio"
+                                  name={keyOf(template.id, question.id)}
+                                  checked={answer?.type === 'single' && answer.value === option.id}
+                                  onChange={() => updateAnswer(template.id, question.id, { type: 'single', value: option.id })}
+                                  className="h-4 w-4 accent-sky-600"
+                                />
+                                <span>{option.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        {question.type === 'multiple' && (
+                          <div className="space-y-2">
+                            {question.options?.map((option) => {
+                              const current = answer?.type === 'multiple' ? answer.value : [];
+                              return (
+                                <label key={option.id} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={current.includes(option.id)}
+                                    onChange={(event) => {
+                                      const next = event.target.checked
+                                        ? [...current, option.id]
+                                        : current.filter((item) => item !== option.id);
+                                      updateAnswer(
+                                        template.id,
+                                        question.id,
+                                        next.length > 0 ? { type: 'multiple', value: next, strategy: 'list' } : undefined
+                                      );
+                                    }}
+                                    className="h-4 w-4 accent-sky-600"
+                                  />
+                                  <span>{option.label}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {question.type === 'numeric' && (
+                          <input
+                            type="number"
+                            value={answer?.type === 'numeric' ? answer.value : ''}
+                            min={question.min}
+                            max={question.max}
+                            onChange={(event) => updateAnswer(
+                              template.id,
+                              question.id,
+                              event.target.value === '' ? undefined : { type: 'numeric', value: Number(event.target.value) }
+                            )}
+                            placeholder={placeholderOf(question)}
+                            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-sky-400"
+                          />
+                        )}
+                        {(question.type === 'text' || question.type === 'long-text') && (
+                          <>
+                            <textarea
+                              value={answer?.type === question.type ? answer.value : ''}
+                              rows={question.type === 'long-text' ? 5 : 3}
+                              maxLength={question.maxLength || 200}
+                              onChange={(event) => updateAnswer(
+                                template.id,
+                                question.id,
+                                event.target.value === '' ? undefined : { type: question.type, value: event.target.value }
+                              )}
+                              placeholder={placeholderOf(question)}
+                              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-sky-400"
+                            />
+                            <div className="mt-2 text-right text-xs text-slate-500">
+                              {(answer?.type === 'text' || answer?.type === 'long-text') ? answer.value.length : 0} / {question.maxLength || 200}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ))}
-          </div>
+            {templates.length === 0 && <div className="rounded-3xl bg-white p-10 text-center text-sm text-slate-500 shadow-sm">当前没有可用模板。</div>}
+          </section>
 
-          {/* 生成按钮 */}
-          <div className="mt-6 flex justify-end">
-            <button
-              onClick={generateQuestionnaireData}
-              disabled={!allRequiredAnswered}
-              className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              生成二维码
-            </button>
-          </div>
+          <aside className="space-y-6">
+            <section className="rounded-3xl bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-bold text-slate-900">回传摘要</h2>
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-2xl bg-slate-950 p-4 text-slate-100">必填完成：{requiredDone} / {requiredTotal}</div>
+                <div className="rounded-2xl bg-sky-50 p-4 text-sky-900">已答题数：{answerEntries.length}</div>
+              </div>
+              <button
+                onClick={() => setSubmission(buildOfflineImportEnvelope({
+                  exchangeId: issue.exchangeId,
+                  maskUuid: issue.maskUuid,
+                  templateIds: resolvedTemplateIds,
+                  answers: answerEntries,
+                }))}
+                disabled={!canSubmit}
+                className="mt-5 w-full rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                生成回传码
+              </button>
+              <p className="mt-3 text-sm leading-6 text-slate-500">
+                回传内容仅包含 `exchangeId`、`maskUuid`、`templateIds` 和答案值，不含实名信息。
+              </p>
+            </section>
+
+            {submission && (
+              <section className="rounded-3xl bg-white p-6 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-xl font-bold text-slate-900">回传载荷</h2>
+                  <div className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{modeText(submission.mode)}</div>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-3 text-xs text-slate-600">
+                  <div className="rounded-2xl bg-slate-50 p-3">长度 {submission.size}</div>
+                  <div className="rounded-2xl bg-slate-50 p-3">预计 {submission.estimatedFrames} 帧</div>
+                  <div className="rounded-2xl bg-slate-50 p-3">answerSheetId 已生成</div>
+                </div>
+                <div className="mt-5 flex justify-center">
+                  {submission.mode === 'single'
+                    ? <QrCodeDisplay data={submission.token} size={260} border={4} className="max-w-sm" />
+                    : fountain.qrData
+                      ? <QrCodeDisplay data={fountain.qrData} size={260} border={4} className="max-w-sm" />
+                      : <div className="flex h-[260px] w-[260px] items-center justify-center rounded-3xl bg-slate-100 text-sm text-slate-500">喷泉码准备中...</div>}
+                </div>
+                <pre className="mt-5 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-200">{submission.token}</pre>
+                <ol className="mt-4 space-y-2 text-sm leading-6 text-slate-600">
+                  <li>1. 单码模式直接让院内导入页扫码。</li>
+                  <li>2. 喷泉码模式保持手机常亮，连续播码直到采集完成。</li>
+                  <li>3. 导入端用 `exchangeId` 与 `maskUuid` 关联回候诊患者。</li>
+                </ol>
+              </section>
+            )}
+
+            <section className="rounded-3xl bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-bold text-slate-900">入口</h2>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Link href="/share" className="rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white">发放模拟页</Link>
+                <Link href="/" className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">返回首页</Link>
+              </div>
+            </section>
+          </aside>
         </div>
-
-        {/* 二维码显示区域 */}
-        {generatedData && (
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">
-              📱 扫描二维码（喷泉码模式）
-            </h2>
-
-            {/* 状态信息 */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-              <div className="text-center">
-                <p className="text-sm text-gray-500">已生成帧数</p>
-                <p className="text-2xl font-bold text-blue-600">{count}</p>
-              </div>
-              <div className="text-center">
-                <p className="text-sm text-gray-500">实时 FPS</p>
-                <p className="text-2xl font-bold text-green-600">{fps.toFixed(1)}</p>
-              </div>
-              <div className="text-center">
-                <p className="text-sm text-gray-500">数据大小</p>
-                <p className="text-2xl font-bold text-purple-600">{(totalBytes / 1024).toFixed(2)} KB</p>
-              </div>
-              <div className="text-center">
-                <p className="text-sm text-gray-500">容量状态</p>
-                <p className={`text-2xl font-bold ${capacityStatus.color}`}>{capacityStatus.text}</p>
-              </div>
-            </div>
-
-            {/* 二维码显示 */}
-            {qrData && (
-              <div className="flex justify-center mb-6">
-                <QrCodeDisplay
-                  data={qrData}
-                  size={280}
-                  border={4}
-                  className="max-w-sm"
-                />
-              </div>
-            )}
-
-            {/* 使用说明 */}
-            <div className="bg-blue-50 rounded-lg p-4">
-              <h3 className="font-semibold text-blue-800 mb-2">📖 使用说明</h3>
-              <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
-                <li>保持手机屏幕常亮，二维码会自动刷新</li>
-                <li>医院端使用摄像头连续扫描</li>
-                <li>扫描进度达到 100% 后自动完成解码</li>
-                <li>喷泉码特性：无需按顺序，任意帧都可解码</li>
-              </ol>
-            </div>
-
-            {/* 错误提示 */}
-            {error && (
-              <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
-                <p className="text-red-800 text-sm">❌ 错误：{error.message}</p>
-              </div>
-            )}
-          </div>
-        )}
       </div>
-    </div>
-  )
+    </main>
+  );
 }

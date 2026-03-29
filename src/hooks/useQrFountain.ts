@@ -2,7 +2,7 @@
  * 使用 LT 编码器生成二维码流
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createEncoder, blockToBinary, toBase64, type LtEncoder } from '../lib/lt-encoder'
 import type { EncodedBlock } from '../lib/lt-encoder'
 
@@ -40,16 +40,25 @@ export function useQrFountain(options: UseQrFountainOptions): UseQrFountainRetur
   
   const encoderRef = useRef<LtEncoder | null>(null)
   const fountainIteratorRef = useRef<ReturnType<LtEncoder['fountain']> | null>(null)
-  const frameRef = useRef<number>(0)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // 初始化编码器
   useEffect(() => {
+    const uint8Data = typeof data === 'string'
+      ? new TextEncoder().encode(data)
+      : data;
+
+    if (!uint8Data || uint8Data.length === 0) {
+      encoderRef.current = null;
+      fountainIteratorRef.current = null;
+      setQrData(null);
+      setBlock(null);
+      setCount(0);
+      setError(null);
+      return;
+    }
+
     try {
-      const uint8Data = typeof data === 'string' 
-        ? new TextEncoder().encode(data) 
-        : data
-      
       encoderRef.current = createEncoder(uint8Data, { sliceSize, compress })
       fountainIteratorRef.current = encoderRef.current.fountain()
       setCount(0)

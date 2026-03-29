@@ -3,7 +3,7 @@
  * 脊柱侧弯预问诊问卷
  */
 
-import type { QuestionnaireTemplate } from '@/types';
+import type { OfflineQuestionnaireBundle, QuestionnaireTemplate } from '@/types';
 
 export const scoliosisQuestionnaire: QuestionnaireTemplate = {
   id: 'scoliosis-v1',
@@ -113,6 +113,29 @@ export const scoliosisQuestionnaire: QuestionnaireTemplate = {
 export const questionnaires: QuestionnaireTemplate[] = [
   scoliosisQuestionnaire,
 ];
+
+export const offlineQuestionnaireBundles: OfflineQuestionnaireBundle[] = [
+  {
+    id: 'STUDIO-QUESTIONNAIRE-BUNDLE',
+    name: '默认工作室问卷镜像',
+    description: '映射 PMS 侧当前启用的默认预问诊问卷组合。',
+    templateIds: ['scoliosis-v1'],
+  },
+];
+
+export function findQuestionnaireById(templateId: string): QuestionnaireTemplate | undefined {
+  return questionnaires.find((item) => item.id === templateId);
+}
+
+export function findBundleById(bundleId: string): OfflineQuestionnaireBundle | undefined {
+  return offlineQuestionnaireBundles.find((item) => item.id === bundleId);
+}
+
+export function resolveTemplates(templateIds: string[]): QuestionnaireTemplate[] {
+  return templateIds
+    .map((templateId) => findQuestionnaireById(templateId))
+    .filter((item): item is QuestionnaireTemplate => Boolean(item));
+}
 
 // 默认导出
 export default scoliosisQuestionnaire;
