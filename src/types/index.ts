@@ -178,6 +178,35 @@ export interface OfflineQuestionnaireBundle {
   templateIds: string[];
 }
 
+export interface QuestionnaireTransferQuestion extends Question {
+  templateId: string;
+  templateLabel: string;
+  sourceTemplateIds?: string[];
+  mergeKey?: string;
+}
+
+export interface QuestionnaireTransferFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeKb: number;
+  summary: string;
+}
+
+export interface OfflineQuestionnaireBundlePayload {
+  version: 'OQX/1';
+  transport: 'questionnaire-bundle';
+  exchangeId: string;
+  maskUuid: string;
+  bundleId: string;
+  templateIds: string[];
+  questionnaireTitle: string;
+  issuedAt: string;
+  questions: QuestionnaireTransferQuestion[];
+  mockFiles: QuestionnaireTransferFile[];
+  notes?: string[];
+}
+
 // 容量限制常量
 export const CAPACITY_LIMITS = {
   SAFE: 1500,

@@ -254,6 +254,26 @@ export default function HospitalPage() {
               </pre>
             </div>
 
+            {decodedResult.transport === 'offline-answer' && Array.isArray(decodedResult.answers) && (
+              <div className="mt-6 space-y-4">
+                <h3 className="font-semibold text-gray-800">
+                  📋 回传答案摘要
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {decodedResult.answers.map((item: any, index: number) => (
+                    <div key={`${item.templateId}-${item.questionId}-${index}`} className="bg-blue-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500 mb-1">
+                        {item.templateId} · 问题 {item.questionId}
+                      </p>
+                      <p className="text-sm font-medium text-gray-800">
+                        {Array.isArray(item.value) ? item.value.join('、') : String(item.value)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* 患者信息摘要 */}
             {decodedResult.type === 'questionnaire' && decodedResult.answers && (
               <div className="mt-6 space-y-4">

@@ -1,10 +1,12 @@
 import pako from 'pako';
 import { Base64 } from 'js-base64';
+import { blockToBinary, createEncoder, toBase64 } from '@/lib/lt-encoder';
 import type {
   Answer,
   OfflineAnswerEntry,
   OfflineImportPayload,
   OfflineIssuePayload,
+  OfflineQuestionnaireBundlePayload,
   OfflineTransportMode,
   QuestionType,
 } from '@/types';
@@ -166,4 +168,40 @@ export function parseOfflineIssueTicket(ticket: string): OfflineIssuePayload {
   }
 
   return payload;
+}
+
+export function buildLtQrTransport(payload: unknown, options: { sliceSize?: number } = {}) {
+  const source = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  const encoder = createEncoder(source, {
+    sliceSize: options.sliceSize || 420,
+    compress: true,
+  });
+  const mode: OfflineTransportMode = encoder.k > 1 ? 'fountain' : 'single';
+  const frames: string[] = [];
+
+  if (mode === 'single') {
+    frames.push(toBase64(blockToBinary(encoder.createBlock([0]))));
+  } else {
+    const iterator = encoder.fountain();
+    const totalFrames = Math.max(encoder.k + 6, encoder.k * 3);
+    for (let index = 0; index < totalFrames; index += 1) {
+      frames.push(toBase64(blockToBinary(iterator.next().value)));
+    }
+  }
+
+  return {
+    mode,
+    estimatedFrames: frames.length,
+    payloadBytes: encoder.bytes,
+    frames,
+  };
+}
+
+export function isQuestionnaireBundlePayload(payload: unknown): payload is OfflineQuestionnaireBundlePayload {
+  return Boolean(
+    payload &&
+    typeof payload === 'object' &&
+    (payload as OfflineQuestionnaireBundlePayload).version === OFFLINE_PROTOCOL_VERSION &&
+    (payload as OfflineQuestionnaireBundlePayload).transport === 'questionnaire-bundle'
+  );
 }
