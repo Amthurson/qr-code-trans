@@ -241,13 +241,17 @@ export default function PatientPage() {
                         {(question.type === 'text' || question.type === 'long-text') && (
                           <>
                             <textarea
-                              value={answer?.type === question.type ? answer.value : ''}
+                              value={(answer?.type === 'text' || answer?.type === 'long-text') ? answer.value : ''}
                               rows={question.type === 'long-text' ? 5 : 3}
                               maxLength={question.maxLength || 200}
                               onChange={(event) => updateAnswer(
                                 template.id,
                                 question.id,
-                                event.target.value === '' ? undefined : { type: question.type, value: event.target.value }
+                                event.target.value === ''
+                                  ? undefined
+                                  : question.type === 'text'
+                                    ? { type: 'text', value: event.target.value }
+                                    : { type: 'long-text', value: event.target.value }
                               )}
                               placeholder={placeholderOf(question)}
                               className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-sky-400"
