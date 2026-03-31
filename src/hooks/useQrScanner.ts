@@ -26,6 +26,7 @@ interface UseQrScannerReturn {
   isComplete: boolean
   decodedData: Uint8Array | null
   error: Error | null
+  lastDetectedAt: number
   startScan: () => void
   stopScan: () => void
   ingestCode: (value: string) => void
@@ -44,6 +45,7 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
   const [isComplete, setIsComplete] = useState(false)
   const [decodedData, setDecodedData] = useState<Uint8Array | null>(null)
   const [error, setError] = useState<Error | null>(null)
+  const [lastDetectedAt, setLastDetectedAt] = useState(0)
   const [progress, setProgress] = useState({
     total: 0,
     decoded: 0,
@@ -84,9 +86,24 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
         },
         {
           maxScansPerSecond,
-          highlightCodeOutline: true,
-          highlightScanRegion: true,
+          highlightCodeOutline: false,
+          highlightScanRegion: false,
           preferredCamera: 'environment', // 使用后置摄像头
+          calculateScanRegion: (video) => {
+            const width = video.videoWidth || video.clientWidth || 1280
+            const height = video.videoHeight || video.clientHeight || 720
+            const maxSide = 960
+            const scale = Math.min(1, maxSide / Math.max(width, height))
+            return {
+              x: 0,
+              y: 0,
+              width,
+              height,
+              downScaledWidth: Math.max(320, Math.round(width * scale)),
+              downScaledHeight: Math.max(320, Math.round(height * scale)),
+            }
+          },
+          returnDetailedScanResult: true,
         }
       )
 
@@ -127,6 +144,7 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
     setDecodedData(null)
     setIsComplete(false)
     setError(null)
+    setLastDetectedAt(0)
     processedCodesRef.current.clear()
   }, [stopScan])
 
@@ -141,6 +159,7 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
       const normalizedData = wrappedFrame ? wrappedFrame.frame : qrData
       if (processedCodesRef.current.has(normalizedData)) return
       processedCodesRef.current.add(normalizedData)
+      setLastDetectedAt(Date.now())
 
       // 解码 Base64
       const binary = fromBase64(normalizedData)
@@ -190,6 +209,7 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
     isComplete,
     decodedData,
     error,
+    lastDetectedAt,
     startScan,
     stopScan,
     ingestCode,

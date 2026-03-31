@@ -136,9 +136,9 @@ export function buildPatientBundleFrameLink(options: {
   frameCount?: number;
 }) {
   const target = new URL(options.publicUrl);
-  target.searchParams.set('bundleFrame', options.frame);
-  if (options.frameIndex) target.searchParams.set('frameIndex', String(options.frameIndex));
-  if (options.frameCount) target.searchParams.set('frameCount', String(options.frameCount));
+  target.searchParams.set('f', toUrlSafeBase64(options.frame));
+  if (options.frameIndex) target.searchParams.set('i', String(options.frameIndex));
+  if (options.frameCount) target.searchParams.set('n', String(options.frameCount));
   return target.toString();
 }
 
@@ -152,14 +152,16 @@ export function extractPatientBundleFrame(rawValue: string): {
   if (!rawValue) return null;
   try {
     const url = new URL(rawValue);
-    const ticket = url.searchParams.get('ticket') || '';
-    const frame = url.searchParams.get('bundleFrame') || '';
+    const ticket = url.searchParams.get('ticket') || url.searchParams.get('t') || '';
+    const compactFrame = url.searchParams.get('f') || '';
+    const legacyFrame = url.searchParams.get('bundleFrame') || '';
+    const frame = compactFrame ? fromUrlSafeBase64(compactFrame) : legacyFrame;
     if (!ticket || !frame) return null;
     return {
       frame,
       ticket,
-      frameIndex: Number(url.searchParams.get('frameIndex') || 0),
-      frameCount: Number(url.searchParams.get('frameCount') || 0),
+      frameIndex: Number(url.searchParams.get('i') || url.searchParams.get('frameIndex') || 0),
+      frameCount: Number(url.searchParams.get('n') || url.searchParams.get('frameCount') || 0),
       href: url.toString(),
     };
   } catch (error) {

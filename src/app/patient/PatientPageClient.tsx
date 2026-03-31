@@ -51,7 +51,7 @@ function modeText(mode: 'single' | 'fountain'): string {
 export default function PatientPageClient() {
   const searchParams = useSearchParams();
   const ticket = searchParams.get('ticket') || '';
-  const bundleFrame = searchParams.get('bundleFrame') || '';
+  const bundleFrame = searchParams.get('f') || searchParams.get('bundleFrame') || '';
 
   const [issue, setIssue] = useState<OfflineIssuePayload>(EMPTY_ISSUE);
   const [issueSource, setIssueSource] = useState<'empty' | 'ticket' | 'bundle'>('empty');
@@ -62,6 +62,7 @@ export default function PatientPageClient() {
   const [receiveError, setReceiveError] = useState('');
   const [submission, setSubmission] = useState<(ReturnType<typeof buildOfflineImportEnvelope> & ReturnType<typeof buildLtQrTransport>) | null>(null);
   const [submissionFrameIndex, setSubmissionFrameIndex] = useState(0);
+  const [reticleActive, setReticleActive] = useState(false);
 
   useEffect(() => {
     if (!ticket) {
@@ -94,6 +95,7 @@ export default function PatientPageClient() {
     progress,
     isComplete,
     error,
+    lastDetectedAt,
     startScan,
     stopScan,
     ingestCode,
@@ -135,6 +137,13 @@ export default function PatientPageClient() {
     if (!bundleFrame) return;
     ingestCode(bundleFrame);
   }, [bundleFrame, ingestCode]);
+
+  useEffect(() => {
+    if (!lastDetectedAt) return undefined;
+    setReticleActive(true);
+    const timer = window.setTimeout(() => setReticleActive(false), 320);
+    return () => window.clearTimeout(timer);
+  }, [lastDetectedAt]);
 
   const questions = bundlePayload?.questions || [];
   const requiredTotal = questions.filter((question) => question.required).length;
@@ -183,17 +192,18 @@ export default function PatientPageClient() {
     return (
       <main className="relative min-h-screen overflow-hidden bg-black text-white">
         <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
-        <div className="absolute inset-0 bg-black/72" />
-        {isScanning && <div className="absolute inset-0 bg-sky-950/10" />}
+        <div className={`absolute inset-0 transition-colors ${isScanning ? 'bg-black/28' : 'bg-black/78'}`} />
 
         <div className="relative z-10 flex min-h-screen flex-col">
-          <div className="flex items-start justify-between gap-4 px-6 py-6">
+          <div className="flex items-start justify-between gap-4 px-5 py-5">
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-300">offline public fill</div>
               <h1 className="text-3xl font-bold">扫码获取问卷</h1>
-              <p className="max-w-2xl text-sm leading-7 text-slate-200">
-                患者用微信扫描院内屏幕上的任意一帧问卷码即可进入此页。进入后点击下方按钮，继续扫描同一组喷泉码接收题目内容。
-              </p>
+              {!isScanning && (
+                <p className="max-w-2xl text-sm leading-7 text-slate-200">
+                  患者用微信扫描院内屏幕上的任意一帧问卷码即可进入此页。点击下方按钮后开启摄像头，再继续扫描同一组喷泉码接收题目内容。
+                </p>
+              )}
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-right text-xs text-slate-200 backdrop-blur">
               <div>来源：{issueSource === 'ticket' ? '一体化问卷码' : '等待扫码'}</div>
@@ -201,50 +211,57 @@ export default function PatientPageClient() {
             </div>
           </div>
 
-          <div className="flex flex-1 items-center justify-center px-6 py-8">
-            <div className="w-full max-w-3xl text-center">
-              <div className="space-y-5 rounded-[32px] border border-white/12 bg-black/30 px-6 py-8 shadow-2xl backdrop-blur-sm">
-                <div className="text-2xl font-semibold">
-                  {isScanning ? '请将摄像头对准院内喷泉码' : '点击扫码获取问卷'}
+          <div className="relative flex flex-1 items-center justify-center px-5 py-4">
+            {isScanning && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div className="relative h-[62vmin] w-[62vmin] max-h-[72vh] max-w-[72vw] min-h-[260px] min-w-[260px]">
+                  <div className={`absolute inset-0 rounded-[36px] border-2 transition-all duration-150 ${
+                    reticleActive ? 'border-emerald-300 shadow-[0_0_0_2px_rgba(110,231,183,0.22),0_0_26px_rgba(110,231,183,0.48)]' : 'border-white/75 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
+                  }`} />
+                  <div className={`absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-colors ${
+                    reticleActive ? 'border-emerald-300 bg-emerald-300/12' : 'border-sky-200/90 bg-sky-200/8'
+                  }`} />
+                  <div className={`absolute left-1/2 top-1/2 h-px w-24 -translate-x-1/2 -translate-y-1/2 transition-colors ${
+                    reticleActive ? 'bg-emerald-300' : 'bg-sky-100/90'
+                  }`} />
+                  <div className={`absolute left-1/2 top-1/2 h-24 w-px -translate-x-1/2 -translate-y-1/2 transition-colors ${
+                    reticleActive ? 'bg-emerald-300' : 'bg-sky-100/90'
+                  }`} />
                 </div>
-                <div className="text-sm leading-7 text-slate-200">
-                  {isScanning
-                    ? '保持手机稳定，对准同一组连续轮播的二维码，系统会自动接收所有数据帧。'
-                    : '摄像头启动后会全屏显示取景区域，方便直接对准院内屏幕扫码。'}
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  {!isScanning && (
+              </div>
+            )}
+
+            {!isScanning && (
+              <div className="w-full max-w-xl text-center">
+                <div className="space-y-5 rounded-[32px] border border-white/12 bg-black/30 px-6 py-8 shadow-2xl backdrop-blur-sm">
+                  <div className="text-2xl font-semibold">点击扫码获取问卷</div>
+                  <div className="text-sm leading-7 text-slate-200">
+                    摄像头启动后，整个屏幕都会作为取景区域；中央准星变绿表示当前帧已经被成功识别。
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
                     <button
                       onClick={startScan}
                       className="rounded-full bg-sky-500 px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/30"
                     >
                       点击扫码获取问卷
                     </button>
-                  )}
-                  {isScanning && (
                     <button
-                      onClick={stopScan}
-                      className="rounded-full bg-white/15 px-8 py-3 text-sm font-semibold text-white"
+                      onClick={() => {
+                        reset();
+                        setReceiveError('');
+                      }}
+                      className="rounded-full border border-white/18 px-8 py-3 text-sm font-semibold text-white/90"
                     >
-                      暂停扫码
+                      重新开始
                     </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      reset();
-                      setReceiveError('');
-                    }}
-                    className="rounded-full border border-white/18 px-8 py-3 text-sm font-semibold text-white/90"
-                  >
-                    重新开始
-                  </button>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
-          <div className="relative z-10 grid gap-4 px-6 pb-8 md:grid-cols-[1.2fr_0.8fr]">
-            <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 backdrop-blur">
+          <div className="relative z-10 grid gap-3 px-4 pb-5 md:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded-[24px] border border-white/10 bg-black/36 p-4 backdrop-blur">
               <div className="flex items-center justify-between gap-3 text-sm">
                 <span className="font-semibold text-white">接收进度</span>
                 <span className="text-sky-200">{progress.percent}%</span>
@@ -262,9 +279,28 @@ export default function PatientPageClient() {
                   已收到入口帧，继续扫描同一组喷泉码即可完成整包接收。
                 </div>
               )}
+              {isScanning && (
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button
+                    onClick={stopScan}
+                    className="rounded-full bg-white/15 px-6 py-2.5 text-sm font-semibold text-white"
+                  >
+                    暂停扫码
+                  </button>
+                  <button
+                    onClick={() => {
+                      reset();
+                      setReceiveError('');
+                    }}
+                    className="rounded-full border border-white/18 px-6 py-2.5 text-sm font-semibold text-white/90"
+                  >
+                    重新开始
+                  </button>
+                </div>
+              )}
             </div>
 
-            <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 backdrop-blur">
+            <div className="rounded-[24px] border border-white/10 bg-black/36 p-4 backdrop-blur">
               <div className="text-sm font-semibold text-white">当前会话</div>
               <div className="mt-4 space-y-2 text-xs leading-6 text-slate-200">
                 <div>exchangeId：<span className="font-mono break-all">{issue.exchangeId || '-'}</span></div>
