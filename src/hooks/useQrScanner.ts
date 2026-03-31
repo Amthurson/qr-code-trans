@@ -5,8 +5,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import QrScanner from 'qr-scanner'
 import { createDecoder, type LtDecoder } from '../lib/lt-decoder'
-import type { EncodedBlock } from '../lib/lt-encoder'
 import { binaryToBlock, fromBase64 } from '../lib/lt-encoder'
+import { extractPatientBundleFrame } from '../lib/offline-questionnaire'
 
 interface UseQrScannerOptions {
   onDecoded?: (data: Uint8Array) => void
@@ -28,6 +28,7 @@ interface UseQrScannerReturn {
   error: Error | null
   startScan: () => void
   stopScan: () => void
+  ingestCode: (value: string) => void
   reset: () => void
 }
 
@@ -70,9 +71,6 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
       }
 
       setError(null)
-      setIsComplete(false)
-      setDecodedData(null)
-      processedCodesRef.current.clear()
 
       // 创建 qr-scanner 实例
       qrScannerRef.current = new QrScanner(
@@ -134,16 +132,18 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
 
   // 处理二维码数据
   const processQrCode = useCallback((qrData: string) => {
-    if (!decoderRef.current || processedCodesRef.current.has(qrData)) {
+    if (!decoderRef.current || !qrData) {
       return
     }
 
     try {
-      // 去重
-      processedCodesRef.current.add(qrData)
+      const wrappedFrame = extractPatientBundleFrame(qrData)
+      const normalizedData = wrappedFrame ? wrappedFrame.frame : qrData
+      if (processedCodesRef.current.has(normalizedData)) return
+      processedCodesRef.current.add(normalizedData)
 
       // 解码 Base64
-      const binary = fromBase64(qrData)
+      const binary = fromBase64(normalizedData)
       
       // 转换为编码块
       const block = binaryToBlock(binary)
@@ -170,6 +170,10 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
     }
   }, [onDecoded, stopScan])
 
+  const ingestCode = useCallback((value: string) => {
+    processQrCode(value)
+  }, [processQrCode])
+
   // 清理
   useEffect(() => {
     return () => {
@@ -188,6 +192,7 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
     error,
     startScan,
     stopScan,
+    ingestCode,
     reset,
   }
 }

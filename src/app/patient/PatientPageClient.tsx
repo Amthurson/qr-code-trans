@@ -51,10 +51,11 @@ function modeText(mode: 'single' | 'fountain'): string {
 export default function PatientPageClient() {
   const searchParams = useSearchParams();
   const ticket = searchParams.get('ticket') || '';
+  const bundleFrame = searchParams.get('bundleFrame') || '';
 
   const [issue, setIssue] = useState<OfflineIssuePayload>(EMPTY_ISSUE);
   const [issueSource, setIssueSource] = useState<'empty' | 'ticket' | 'bundle'>('empty');
-  const [issueWarning, setIssueWarning] = useState('当前页面为空白入口页，请点击“开始扫码接收问卷”并对准院内屏幕上的问卷传输码。');
+  const [issueWarning, setIssueWarning] = useState('点击“扫码获取问卷”后，对准院内屏幕上的问卷码继续接收内容。');
   const [issueError, setIssueError] = useState('');
   const [bundlePayload, setBundlePayload] = useState<OfflineQuestionnaireBundlePayload | null>(null);
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
@@ -67,7 +68,7 @@ export default function PatientPageClient() {
       setIssue(EMPTY_ISSUE);
       setIssueSource('empty');
       setIssueError('');
-      setIssueWarning('当前页面为空白入口页，请点击“开始扫码接收问卷”并对准院内屏幕上的问卷传输码。');
+      setIssueWarning('点击“扫码获取问卷”后，对准院内屏幕上的问卷码继续接收内容。');
       return;
     }
 
@@ -76,14 +77,16 @@ export default function PatientPageClient() {
       setIssue(parsedIssue);
       setIssueSource('ticket');
       setIssueError('');
-      setIssueWarning('已收到发放会话，但题目内容不会跟随链接下发，请继续扫描院内问卷传输码。');
+      setIssueWarning(bundleFrame
+        ? '已打开填写入口，请点击“扫码获取问卷”并继续扫描同一组喷泉码。'
+        : '已进入填写入口，请点击“扫码获取问卷”并对准院内问卷码。');
     } catch (error) {
       setIssue(EMPTY_ISSUE);
       setIssueSource('empty');
       setIssueError(error instanceof Error ? error.message : '发放码解析失败');
       setIssueWarning('已回退为空白入口页，请重新扫描入口二维码。');
     }
-  }, [ticket]);
+  }, [bundleFrame, ticket]);
 
   const {
     videoRef,
@@ -93,6 +96,7 @@ export default function PatientPageClient() {
     error,
     startScan,
     stopScan,
+    ingestCode,
     reset,
   } = useQrScanner({
     onDecoded: (data) => {
@@ -126,6 +130,11 @@ export default function PatientPageClient() {
     },
     maxScansPerSecond: 30,
   });
+
+  useEffect(() => {
+    if (!bundleFrame) return;
+    ingestCode(bundleFrame);
+  }, [bundleFrame, ingestCode]);
 
   const questions = bundlePayload?.questions || [];
   const requiredTotal = questions.filter((question) => question.required).length;
@@ -170,6 +179,124 @@ export default function PatientPageClient() {
 
   const sourceTemplateLabels = Array.from(new Set(questions.map((question) => question.templateLabel)));
 
+  if (!bundlePayload) {
+    return (
+      <main className="relative min-h-screen overflow-hidden bg-black text-white">
+        <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
+        <div className="absolute inset-0 bg-black/72" />
+        {isScanning && <div className="absolute inset-0 bg-sky-950/10" />}
+
+        <div className="relative z-10 flex min-h-screen flex-col">
+          <div className="flex items-start justify-between gap-4 px-6 py-6">
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-300">offline public fill</div>
+              <h1 className="text-3xl font-bold">扫码获取问卷</h1>
+              <p className="max-w-2xl text-sm leading-7 text-slate-200">
+                患者用微信扫描院内屏幕上的任意一帧问卷码即可进入此页。进入后点击下方按钮，继续扫描同一组喷泉码接收题目内容。
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-right text-xs text-slate-200 backdrop-blur">
+              <div>来源：{issueSource === 'ticket' ? '一体化问卷码' : '等待扫码'}</div>
+              <div className="mt-1">bundleId：<span className="font-mono">{issue.bundleId || '-'}</span></div>
+            </div>
+          </div>
+
+          <div className="flex flex-1 items-center justify-center px-6 py-8">
+            <div className="w-full max-w-3xl text-center">
+              <div className="space-y-5 rounded-[32px] border border-white/12 bg-black/30 px-6 py-8 shadow-2xl backdrop-blur-sm">
+                <div className="text-2xl font-semibold">
+                  {isScanning ? '请将摄像头对准院内喷泉码' : '点击扫码获取问卷'}
+                </div>
+                <div className="text-sm leading-7 text-slate-200">
+                  {isScanning
+                    ? '保持手机稳定，对准同一组连续轮播的二维码，系统会自动接收所有数据帧。'
+                    : '摄像头启动后会全屏显示取景区域，方便直接对准院内屏幕扫码。'}
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  {!isScanning && (
+                    <button
+                      onClick={startScan}
+                      className="rounded-full bg-sky-500 px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/30"
+                    >
+                      点击扫码获取问卷
+                    </button>
+                  )}
+                  {isScanning && (
+                    <button
+                      onClick={stopScan}
+                      className="rounded-full bg-white/15 px-8 py-3 text-sm font-semibold text-white"
+                    >
+                      暂停扫码
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      reset();
+                      setReceiveError('');
+                    }}
+                    className="rounded-full border border-white/18 px-8 py-3 text-sm font-semibold text-white/90"
+                  >
+                    重新开始
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="relative z-10 grid gap-4 px-6 pb-8 md:grid-cols-[1.2fr_0.8fr]">
+            <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 backdrop-blur">
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="font-semibold text-white">接收进度</span>
+                <span className="text-sky-200">{progress.percent}%</span>
+              </div>
+              <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/10">
+                <div className="h-full rounded-full bg-sky-400 transition-all" style={{ width: `${progress.percent}%` }} />
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-3 text-center text-xs text-slate-200">
+                <div className="rounded-2xl bg-black/20 p-3">总块数 {progress.total}</div>
+                <div className="rounded-2xl bg-black/20 p-3">已解码 {progress.decoded}</div>
+                <div className="rounded-2xl bg-black/20 p-3">已接收 {progress.encoded}</div>
+              </div>
+              {bundleFrame && (
+                <div className="mt-4 rounded-2xl bg-emerald-500/14 px-4 py-3 text-sm text-emerald-100">
+                  已收到入口帧，继续扫描同一组喷泉码即可完成整包接收。
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 backdrop-blur">
+              <div className="text-sm font-semibold text-white">当前会话</div>
+              <div className="mt-4 space-y-2 text-xs leading-6 text-slate-200">
+                <div>exchangeId：<span className="font-mono break-all">{issue.exchangeId || '-'}</span></div>
+                <div>maskUuid：<span className="font-mono break-all">{issue.maskUuid || '-'}</span></div>
+                <div>模板：{issue.templateIds.length ? issue.templateIds.join(' / ') : '待接收'}</div>
+              </div>
+              {(issueError || issueWarning || receiveError || error) && (
+                <div className="mt-4 space-y-3 text-sm">
+                  {issueError && <div className="rounded-2xl bg-rose-500/18 px-4 py-3 text-rose-100">{issueError}</div>}
+                  {issueWarning && <div className="rounded-2xl bg-amber-400/14 px-4 py-3 text-amber-50">{issueWarning}</div>}
+                  {(receiveError || error) && (
+                    <div className="rounded-2xl bg-rose-500/18 px-4 py-3 text-rose-100">
+                      {receiveError || error?.message}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Link href="/" className="rounded-full border border-white/16 px-4 py-2 text-sm font-semibold text-white/90">
+                  返回首页
+                </Link>
+                <Link href="/hospital" className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950">
+                  打开医院导入页
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -179,11 +306,11 @@ export default function PatientPageClient() {
               <div className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">offline public fill</div>
               <h1 className="mt-2 text-3xl font-bold text-slate-900">公网患者填写页</h1>
               <p className="mt-3 text-sm leading-7 text-slate-600">
-                入口链接本身不带题目数据。患者进入页面后，需要继续扫描院内屏幕上的问卷传输码，题目和模拟资料才会被下发到手机端。
+                患者可微信扫描院内问卷码的任意一帧进入本页。进入后继续扫描同一组喷泉码，题目和模拟资料会逐步接收到手机端。
               </p>
             </div>
             <div className="grid min-w-[280px] gap-3 rounded-2xl bg-slate-950 p-4 text-sm text-slate-200">
-              <div>来源：{issueSource === 'bundle' ? '扫码接收问卷内容' : issueSource === 'ticket' ? '入口 ticket' : '空白入口'}</div>
+              <div>来源：{issueSource === 'bundle' ? '一体化问卷码' : issueSource === 'ticket' ? '问卷入口 ticket' : '空白入口'}</div>
               <div>bundleId：<span className="font-mono">{issue.bundleId || '-'}</span></div>
               <div>exchangeId：<span className="font-mono break-all">{issue.exchangeId || '-'}</span></div>
               <div>maskUuid：<span className="font-mono break-all">{issue.maskUuid || '-'}</span></div>
@@ -198,90 +325,7 @@ export default function PatientPageClient() {
           )}
         </section>
 
-        {!bundlePayload && (
-          <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-            <div className="rounded-3xl bg-white p-6 shadow-sm">
-              <h2 className="text-2xl font-bold text-slate-900">接收问卷内容</h2>
-              <p className="mt-2 text-sm leading-7 text-slate-600">
-                先保持当前页面打开，再把手机摄像头对准院内 PMS 屏幕上的“接收问卷内容”二维码。如果题目包较大，页面会自动连续接收喷泉码。
-              </p>
-              <div className="relative mt-6 overflow-hidden rounded-3xl bg-black aspect-video">
-                <video ref={videoRef} className="h-full w-full object-cover" playsInline muted />
-                {!isScanning && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/55 text-center text-sm text-white">
-                    <div className="space-y-3">
-                      <div>点击下方按钮启动摄像头</div>
-                      <div>将手机对准院内屏幕上的问卷传输二维码</div>
-                    </div>
-                  </div>
-                )}
-                {isComplete && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-emerald-600/80 text-2xl font-bold text-white">
-                    接收完成
-                  </div>
-                )}
-              </div>
-              <div className="mt-5 flex flex-wrap gap-3">
-                {!isScanning && (
-                  <button onClick={startScan} className="rounded-full bg-sky-600 px-5 py-2 text-sm font-semibold text-white">
-                    开始扫码接收
-                  </button>
-                )}
-                {isScanning && (
-                  <button onClick={stopScan} className="rounded-full bg-amber-500 px-5 py-2 text-sm font-semibold text-white">
-                    暂停扫码
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    reset();
-                    setReceiveError('');
-                  }}
-                  className="rounded-full border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600"
-                >
-                  重置扫描
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-6">
-              <div className="rounded-3xl bg-white p-6 shadow-sm">
-                <h2 className="text-xl font-bold text-slate-900">接收进度</h2>
-                <div className="mt-4 rounded-2xl bg-slate-100 p-4">
-                  <div className="flex items-center justify-between text-sm text-slate-600">
-                    <span>解码进度</span>
-                    <span>{progress.percent}%</span>
-                  </div>
-                  <div className="mt-3 h-3 overflow-hidden rounded-full bg-white">
-                    <div className="h-full rounded-full bg-sky-600 transition-all" style={{ width: `${progress.percent}%` }} />
-                  </div>
-                  <div className="mt-4 grid grid-cols-3 gap-3 text-center text-xs text-slate-500">
-                    <div className="rounded-2xl bg-white p-3">总块数 {progress.total}</div>
-                    <div className="rounded-2xl bg-white p-3">已解码 {progress.decoded}</div>
-                    <div className="rounded-2xl bg-white p-3">已接收 {progress.encoded}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-3xl bg-white p-6 shadow-sm">
-                <h2 className="text-xl font-bold text-slate-900">提示</h2>
-                <ol className="mt-4 space-y-2 text-sm leading-7 text-slate-600">
-                  <li>1. 先扫入口二维码打开当前页面。</li>
-                  <li>2. 再点“开始扫码接收”，对准院内屏幕上的问卷传输码。</li>
-                  <li>3. 问卷包里包含 3 份模拟资料，多选题会在下发前自动合并。</li>
-                </ol>
-                {(receiveError || error) && (
-                  <div className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                    {receiveError || error?.message}
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {bundlePayload && (
-          <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
+        <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
             <section className="space-y-6">
               <div className="rounded-3xl bg-white p-6 shadow-sm">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -478,7 +522,6 @@ export default function PatientPageClient() {
               </section>
             </aside>
           </div>
-        )}
       </div>
     </main>
   );

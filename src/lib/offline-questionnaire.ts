@@ -129,6 +129,44 @@ export function buildOfflineIssueEnvelope(options: {
   };
 }
 
+export function buildPatientBundleFrameLink(options: {
+  publicUrl: string;
+  frame: string;
+  frameIndex?: number;
+  frameCount?: number;
+}) {
+  const target = new URL(options.publicUrl);
+  target.searchParams.set('bundleFrame', options.frame);
+  if (options.frameIndex) target.searchParams.set('frameIndex', String(options.frameIndex));
+  if (options.frameCount) target.searchParams.set('frameCount', String(options.frameCount));
+  return target.toString();
+}
+
+export function extractPatientBundleFrame(rawValue: string): {
+  frame: string;
+  ticket: string;
+  frameIndex: number;
+  frameCount: number;
+  href: string;
+} | null {
+  if (!rawValue) return null;
+  try {
+    const url = new URL(rawValue);
+    const ticket = url.searchParams.get('ticket') || '';
+    const frame = url.searchParams.get('bundleFrame') || '';
+    if (!ticket || !frame) return null;
+    return {
+      frame,
+      ticket,
+      frameIndex: Number(url.searchParams.get('frameIndex') || 0),
+      frameCount: Number(url.searchParams.get('frameCount') || 0),
+      href: url.toString(),
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
 export function buildOfflineImportEnvelope(options: {
   exchangeId?: string;
   maskUuid?: string;
