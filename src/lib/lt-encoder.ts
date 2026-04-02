@@ -27,7 +27,7 @@ function getChecksum(data: Uint8Array, k: number): number {
     hash = ((hash << 5) - hash) + data[i]
     hash = hash & hash
   }
-  return hash ^ k
+  return (hash ^ k) >>> 0
 }
 
 /**

@@ -24,6 +24,16 @@ function fromUrlSafeBase64(value: string): string {
   return `${normalized}${'='.repeat(padLength)}`;
 }
 
+export function normalizePatientBundleFrame(rawValue: string): string {
+  if (!rawValue) return '';
+  const wrappedFrame = extractPatientBundleFrame(rawValue);
+  if (wrappedFrame?.frame) return wrappedFrame.frame;
+  if (/^[A-Za-z0-9+/_-]+$/.test(rawValue) && !/[?&=]/.test(rawValue)) {
+    return fromUrlSafeBase64(rawValue);
+  }
+  return rawValue;
+}
+
 export function createOfflineExchangeId(prefix = 'oqr'): string {
   const random = Math.random().toString(36).slice(2, 10);
   return `${prefix}_${Date.now().toString(36)}_${random}`.toUpperCase();

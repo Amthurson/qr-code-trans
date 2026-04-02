@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import QrScanner from 'qr-scanner'
 import { createDecoder, type LtDecoder } from '../lib/lt-decoder'
 import { binaryToBlock, fromBase64 } from '../lib/lt-encoder'
-import { extractPatientBundleFrame } from '../lib/offline-questionnaire'
+import { normalizePatientBundleFrame } from '../lib/offline-questionnaire'
 
 interface UseQrScannerOptions {
   onDecoded?: (data: Uint8Array) => void
@@ -155,8 +155,7 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
     }
 
     try {
-      const wrappedFrame = extractPatientBundleFrame(qrData)
-      const normalizedData = wrappedFrame ? wrappedFrame.frame : qrData
+      const normalizedData = normalizePatientBundleFrame(qrData)
       if (processedCodesRef.current.has(normalizedData)) return
       processedCodesRef.current.add(normalizedData)
       setLastDetectedAt(Date.now())
