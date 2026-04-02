@@ -50,7 +50,7 @@ function modeText(mode: 'single' | 'fountain'): string {
 
 export default function PatientPageClient() {
   const searchParams = useSearchParams();
-  const ticket = searchParams.get('ticket') || '';
+  const ticket = searchParams.get('ticket') || searchParams.get('t') || '';
   const bundleFrame = searchParams.get('f') || searchParams.get('bundleFrame') || '';
 
   const [issue, setIssue] = useState<OfflineIssuePayload>(EMPTY_ISSUE);

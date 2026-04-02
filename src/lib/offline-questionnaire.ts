@@ -136,6 +136,9 @@ export function buildPatientBundleFrameLink(options: {
   frameCount?: number;
 }) {
   const target = new URL(options.publicUrl);
+  const ticket = target.searchParams.get('ticket') || target.searchParams.get('t') || '';
+  target.search = '';
+  if (ticket) target.searchParams.set('t', ticket);
   target.searchParams.set('f', toUrlSafeBase64(options.frame));
   if (options.frameIndex) target.searchParams.set('i', String(options.frameIndex));
   if (options.frameCount) target.searchParams.set('n', String(options.frameCount));
