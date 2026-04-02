@@ -8,8 +8,8 @@ import { useQrScanner } from '@/hooks/useQrScanner';
 import {
   buildLtQrTransport,
   buildOfflineImportEnvelope,
-  parseOfflineIssueTicket,
   isQuestionnaireBundlePayload,
+  parseOfflineIssueTicket,
 } from '@/lib/offline-questionnaire';
 import type {
   Answer,
@@ -26,6 +26,15 @@ const EMPTY_ISSUE: OfflineIssuePayload = {
   bundleId: '',
   templateIds: [],
 };
+
+interface QuestionnaireGroup {
+  id: string;
+  label: string;
+  questions: QuestionnaireTransferQuestion[];
+  requiredTotal: number;
+  requiredDone: number;
+  completed: boolean;
+}
 
 function keyOf(question: QuestionnaireTransferQuestion): string {
   return `${question.templateId}:${question.id}`;
@@ -63,6 +72,9 @@ export default function PatientPageClient() {
   const [submission, setSubmission] = useState<(ReturnType<typeof buildOfflineImportEnvelope> & ReturnType<typeof buildLtQrTransport>) | null>(null);
   const [submissionFrameIndex, setSubmissionFrameIndex] = useState(0);
   const [reticleActive, setReticleActive] = useState(false);
+  const [activeQuestionnaireId, setActiveQuestionnaireId] = useState<string | null>(null);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [needsRegenerate, setNeedsRegenerate] = useState(false);
 
   useEffect(() => {
     if (!ticket) {
@@ -89,28 +101,6 @@ export default function PatientPageClient() {
     }
   }, [bundleFrame, ticket]);
 
-  const {
-    videoRef,
-    isScanning,
-    progress,
-    isComplete,
-    decodedData,
-    error,
-    lastDetectedAt,
-    startScan,
-    stopScan,
-    ingestCode,
-    reset,
-  } = useQrScanner({
-    onDecoded: (data) => {
-      applyBundlePayload(data);
-    },
-    onError: (scanError) => {
-      setReceiveError(scanError.message);
-    },
-    maxScansPerSecond: 30,
-  });
-
   const applyBundlePayload = useCallback((data: Uint8Array) => {
     try {
       const text = new TextDecoder().decode(data);
@@ -133,10 +123,35 @@ export default function PatientPageClient() {
       setReceiveError('');
       setAnswers({});
       setSubmission(null);
+      setActiveQuestionnaireId(null);
+      setCurrentQuestionIndex(0);
+      setNeedsRegenerate(false);
     } catch (decodeError) {
       setReceiveError(decodeError instanceof Error ? decodeError.message : '问卷内容解析失败');
     }
   }, []);
+
+  const {
+    videoRef,
+    isScanning,
+    progress,
+    isComplete,
+    decodedData,
+    error,
+    lastDetectedAt,
+    startScan,
+    stopScan,
+    ingestCode,
+    reset,
+  } = useQrScanner({
+    onDecoded: (data) => {
+      applyBundlePayload(data);
+    },
+    onError: (scanError) => {
+      setReceiveError(scanError.message);
+    },
+    maxScansPerSecond: 30,
+  });
 
   useEffect(() => {
     if (!decodedData || bundlePayload) return;
@@ -156,6 +171,36 @@ export default function PatientPageClient() {
   }, [lastDetectedAt]);
 
   const questions = bundlePayload?.questions || [];
+
+  const questionnaires = useMemo(() => {
+    if (!bundlePayload) return [] as QuestionnaireGroup[];
+    return bundlePayload.templateIds
+      .map((templateId) => {
+        const groupQuestions = questions.filter((question) => question.templateId === templateId);
+        if (!groupQuestions.length) return null;
+        const requiredTotal = groupQuestions.filter((question) => question.required).length;
+        const requiredDone = groupQuestions.filter((question) => isFilled(answers[keyOf(question)])).length;
+        return {
+          id: templateId,
+          label: groupQuestions[0]?.templateLabel || templateId,
+          questions: groupQuestions,
+          requiredTotal,
+          requiredDone,
+          completed: requiredTotal > 0 && requiredTotal === requiredDone,
+        };
+      })
+      .filter(Boolean) as QuestionnaireGroup[];
+  }, [answers, bundlePayload, questions]);
+
+  const activeQuestionnaire = useMemo(
+    () => questionnaires.find((item) => item.id === activeQuestionnaireId) || null,
+    [activeQuestionnaireId, questionnaires],
+  );
+
+  const currentQuestion = activeQuestionnaire?.questions[currentQuestionIndex] || null;
+  const currentAnswer = currentQuestion ? answers[keyOf(currentQuestion)] : undefined;
+  const questionnaireCount = questionnaires.length;
+  const completedQuestionnaireCount = questionnaires.filter((item) => item.completed).length;
   const requiredTotal = questions.filter((question) => question.required).length;
   const requiredDone = questions.filter((question) => isFilled(answers[keyOf(question)])).length;
   const canSubmit = Boolean(bundlePayload) && requiredTotal > 0 && requiredTotal === requiredDone;
@@ -175,15 +220,26 @@ export default function PatientPageClient() {
       if (!answer) return list;
       list.push({
         templateId: question.templateId,
+        templateLabel: question.templateLabel,
         questionId: question.id,
+        questionTitle: question.title,
+        fieldKey: question.key,
         questionType: answer.type,
         value: answer.type === 'multiple' ? [...answer.value].sort() : answer.value,
       });
       return list;
-    }, [] as Array<{ templateId: string; questionId: number; questionType: Answer['type']; value: string | number | string[] }>);
+    }, [] as Array<{
+      templateId: string;
+      templateLabel: string;
+      questionId: number;
+      questionTitle: string;
+      fieldKey: string;
+      questionType: Answer['type'];
+      value: string | number | string[];
+    }>);
   }, [answers, questions]);
 
-  const updateAnswer = (question: QuestionnaireTransferQuestion, answer?: Answer) => {
+  const updateAnswer = useCallback((question: QuestionnaireTransferQuestion, answer?: Answer) => {
     const answerKey = keyOf(question);
     setAnswers((current) => {
       if (!answer) {
@@ -193,10 +249,56 @@ export default function PatientPageClient() {
       }
       return { ...current, [answerKey]: answer };
     });
-    setSubmission(null);
-  };
+    if (submission) {
+      setSubmission(null);
+      setNeedsRegenerate(true);
+    }
+  }, [submission]);
 
-  const sourceTemplateLabels = Array.from(new Set(questions.map((question) => question.templateLabel)));
+  const openQuestionnaire = useCallback((questionnaireId: string) => {
+    const target = questionnaires.find((item) => item.id === questionnaireId);
+    if (!target) return;
+    const firstPendingIndex = target.questions.findIndex((question) => question.required && !isFilled(answers[keyOf(question)]));
+    setActiveQuestionnaireId(questionnaireId);
+    setCurrentQuestionIndex(firstPendingIndex > -1 ? firstPendingIndex : 0);
+  }, [answers, questionnaires]);
+
+  const closeQuestionnaire = useCallback(() => {
+    setActiveQuestionnaireId(null);
+    setCurrentQuestionIndex(0);
+  }, []);
+
+  const moveQuestion = useCallback((direction: 'prev' | 'next') => {
+    if (!activeQuestionnaire) return;
+    if (direction === 'prev') {
+      setCurrentQuestionIndex((current) => Math.max(0, current - 1));
+      return;
+    }
+    if (currentQuestionIndex >= activeQuestionnaire.questions.length - 1) {
+      closeQuestionnaire();
+      return;
+    }
+    setCurrentQuestionIndex((current) => Math.min(activeQuestionnaire.questions.length - 1, current + 1));
+  }, [activeQuestionnaire, closeQuestionnaire, currentQuestionIndex]);
+
+  const generateSubmission = useCallback(() => {
+    if (!bundlePayload) return;
+    const answerEnvelope = buildOfflineImportEnvelope({
+      exchangeId: bundlePayload.exchangeId,
+      maskUuid: bundlePayload.maskUuid,
+      templateIds: bundlePayload.templateIds,
+      answers: answerEntries,
+    });
+    const qrTransport = buildLtQrTransport(answerEnvelope.payload);
+    setSubmission({
+      ...answerEnvelope,
+      ...qrTransport,
+    });
+    setNeedsRegenerate(false);
+  }, [answerEntries, bundlePayload]);
+
+  const activeQuestionAnswered = currentQuestion ? !currentQuestion.required || isFilled(currentAnswer) : false;
+  const mobileFrameClasses = 'mx-auto min-h-screen w-full max-w-[390px] bg-white sm:min-h-[820px] sm:rounded-[38px] sm:border sm:border-[#cfd9ff] sm:shadow-[0_28px_90px_rgba(82,112,228,0.18)]';
 
   if (!bundlePayload) {
     return (
@@ -352,230 +454,314 @@ export default function PatientPageClient() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <section className="rounded-3xl bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="max-w-3xl">
-              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">offline public fill</div>
-              <h1 className="mt-2 text-3xl font-bold text-slate-900">公网患者填写页</h1>
-              <p className="mt-3 text-sm leading-7 text-slate-600">
-                患者可微信扫描院内问卷码的任意一帧进入本页。进入后继续扫描同一组喷泉码，题目和模拟资料会逐步接收到手机端。
-              </p>
+    <main className="min-h-screen bg-[linear-gradient(180deg,#eef3ff_0%,#e5edff_100%)] px-0 py-0 sm:px-6 sm:py-8">
+      <div className="mx-auto flex max-w-[980px] justify-center">
+        <div className={mobileFrameClasses}>
+          <div className="px-5 pb-8 pt-4">
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>14:30</span>
+              <span className="font-mono">{bundlePayload.bundleId}</span>
             </div>
-            <div className="grid min-w-[280px] gap-3 rounded-2xl bg-slate-950 p-4 text-sm text-slate-200">
-              <div>来源：{issueSource === 'bundle' ? '一体化问卷码' : issueSource === 'ticket' ? '问卷入口 ticket' : '空白入口'}</div>
-              <div>bundleId：<span className="font-mono">{issue.bundleId || '-'}</span></div>
-              <div>exchangeId：<span className="font-mono break-all">{issue.exchangeId || '-'}</span></div>
-              <div>maskUuid：<span className="font-mono break-all">{issue.maskUuid || '-'}</span></div>
-              <div>模板：{issue.templateIds.length ? issue.templateIds.join(', ') : '待接收'}</div>
-            </div>
-          </div>
-          {(issueError || issueWarning) && (
-            <div className="mt-4 space-y-2 text-sm">
-              {issueError && <div className="rounded-2xl bg-rose-50 px-4 py-3 text-rose-700">入口码错误：{issueError}</div>}
-              {issueWarning && <div className="rounded-2xl bg-amber-50 px-4 py-3 text-amber-700">{issueWarning}</div>}
-            </div>
-          )}
-        </section>
-
-        <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
-            <section className="space-y-6">
-              <div className="rounded-3xl bg-white p-6 shadow-sm">
-                <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-bold text-slate-900">{bundlePayload.questionnaireTitle}</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      已接收 {questions.length} 道题，来源模板：{sourceTemplateLabels.join(' / ')}
-                    </p>
+            {activeQuestionnaire && currentQuestion ? (
+              <section className="mt-4 space-y-5">
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={closeQuestionnaire}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-[#dbe4ff] text-lg text-[#4d67d8]"
+                  >
+                    ‹
+                  </button>
+                  <div className="text-center">
+                    <div className="text-[20px] font-semibold text-[#1f3573]">{activeQuestionnaire.label}</div>
+                    <div className="mt-1 text-xs text-[#7c8cbd]">患者端 · 原 APP 问卷交互样式</div>
                   </div>
-                  <div className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                    issuedAt {new Date(bundlePayload.issuedAt).toLocaleString()}
-                  </div>
+                  <button
+                    onClick={closeQuestionnaire}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-[#dbe4ff] text-lg text-[#4d67d8]"
+                  >
+                    ×
+                  </button>
                 </div>
 
-                {bundlePayload.mockFiles.length > 0 && (
-                  <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="text-sm font-semibold text-slate-900">模拟资料（3 份）</div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                      {bundlePayload.mockFiles.map((file) => (
-                        <div key={file.id} className="rounded-2xl bg-white p-4 text-sm text-slate-600 shadow-sm">
-                          <div className="font-semibold text-slate-900">{file.name}</div>
-                          <div className="mt-1">{file.mimeType} · {file.sizeKb} KB</div>
-                          <div className="mt-2 text-xs leading-6 text-slate-500">{file.summary}</div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-[#e8edff]">
+                  <div
+                    className="h-full rounded-full bg-[linear-gradient(90deg,#5f7cff_0%,#6f86ff_100%)]"
+                    style={{ width: `${((currentQuestionIndex + 1) / activeQuestionnaire.questions.length) * 100}%` }}
+                  />
+                </div>
+
+                <div className="text-center text-[44px] font-semibold leading-none text-[#24439b]">
+                  {currentQuestionIndex + 1}/{activeQuestionnaire.questions.length}
+                </div>
+
+                <div className="space-y-3 rounded-[28px] border border-[#dbe4ff] bg-white px-4 py-5 shadow-[0_16px_42px_rgba(104,128,244,0.12)]">
+                  <div className="text-[23px] font-semibold text-[#20315f]">问卷填写页</div>
+                  <div className="text-xs text-[#8b9ac3]">关联字段：{currentQuestion.key}</div>
+                  <p className="pt-2 text-[22px] leading-[1.55] text-[#20315f]">
+                    {currentQuestion.id}. {currentQuestion.title}
+                    {currentQuestion.required && <span className="ml-1 text-[#ff5a67]">*</span>}
+                  </p>
+
+                  {currentQuestion.type === 'single' && (
+                    <div className="space-y-3 pt-2">
+                      {currentQuestion.options?.map((option) => (
+                        <button
+                          key={option.id}
+                          onClick={() => updateAnswer(currentQuestion, { type: 'single', value: option.id })}
+                          className={`flex w-full items-center gap-3 rounded-[20px] border px-4 py-4 text-left text-base transition ${
+                            currentAnswer?.type === 'single' && currentAnswer.value === option.id
+                              ? 'border-[#5f7cff] bg-[#eef2ff] text-[#24439b]'
+                              : 'border-[#dbe4ff] bg-white text-[#20315f]'
+                          }`}
+                        >
+                          <span className={`h-5 w-5 rounded-full border ${
+                            currentAnswer?.type === 'single' && currentAnswer.value === option.id
+                              ? 'border-[#5f7cff] bg-[#5f7cff] shadow-[inset_0_0_0_4px_#fff]'
+                              : 'border-[#bcc8f2]'
+                          }`} />
+                          <span>{option.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {currentQuestion.type === 'multiple' && (
+                    <div className="space-y-3 pt-2">
+                      <div className="text-sm text-[#7f8db7]">可多选，最多 {currentQuestion.maxSelect || currentQuestion.options?.length || 1} 项</div>
+                      {currentQuestion.options?.map((option) => {
+                        const selected = currentAnswer?.type === 'multiple' ? currentAnswer.value : [];
+                        const checked = selected.includes(option.id);
+                        return (
+                          <button
+                            key={option.id}
+                            onClick={() => {
+                              const currentValues = currentAnswer?.type === 'multiple' ? currentAnswer.value : [];
+                              const nextValues = checked
+                                ? currentValues.filter((item) => item !== option.id)
+                                : currentValues.length >= (currentQuestion.maxSelect || currentQuestion.options?.length || 1)
+                                  ? currentValues
+                                  : currentValues.concat(option.id);
+                              updateAnswer(
+                                currentQuestion,
+                                nextValues.length ? { type: 'multiple', value: nextValues, strategy: 'list' } : undefined,
+                              );
+                            }}
+                            className={`flex w-full items-center gap-3 rounded-[20px] border px-4 py-4 text-left text-base transition ${
+                              checked
+                                ? 'border-[#5f7cff] bg-[#eef2ff] text-[#24439b]'
+                                : 'border-[#dbe4ff] bg-white text-[#20315f]'
+                            }`}
+                          >
+                            <span className={`flex h-5 w-5 items-center justify-center rounded-md border text-[12px] ${
+                              checked
+                                ? 'border-[#5f7cff] bg-[#5f7cff] text-white'
+                                : 'border-[#bcc8f2] text-transparent'
+                            }`}>
+                              ✓
+                            </span>
+                            <span>{option.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {currentQuestion.type === 'numeric' && (
+                    <div className="pt-2">
+                      <input
+                        type="number"
+                        min={currentQuestion.min}
+                        max={currentQuestion.max}
+                        value={currentAnswer?.type === 'numeric' ? String(currentAnswer.value) : ''}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          updateAnswer(
+                            currentQuestion,
+                            nextValue === '' ? undefined : { type: 'numeric', value: Number(nextValue) },
+                          );
+                        }}
+                        placeholder={placeholderOf(currentQuestion)}
+                        className="w-full rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[18px] text-[#20315f] outline-none focus:border-[#5f7cff]"
+                      />
+                    </div>
+                  )}
+
+                  {currentQuestion.type === 'text' && (
+                    <div className="pt-2">
+                      <input
+                        type="text"
+                        value={currentAnswer?.type === 'text' ? currentAnswer.value : ''}
+                        maxLength={currentQuestion.maxLength || 80}
+                        onChange={(event) => {
+                          updateAnswer(
+                            currentQuestion,
+                            event.target.value === '' ? undefined : { type: 'text', value: event.target.value },
+                          );
+                        }}
+                        placeholder={placeholderOf(currentQuestion)}
+                        className="w-full rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[18px] text-[#20315f] outline-none focus:border-[#5f7cff]"
+                      />
+                    </div>
+                  )}
+
+                  {currentQuestion.type === 'long-text' && (
+                    <div className="pt-2">
+                      <textarea
+                        rows={6}
+                        value={currentAnswer?.type === 'long-text' ? currentAnswer.value : ''}
+                        maxLength={currentQuestion.maxLength || 200}
+                        onChange={(event) => {
+                          updateAnswer(
+                            currentQuestion,
+                            event.target.value === '' ? undefined : { type: 'long-text', value: event.target.value },
+                          );
+                        }}
+                        placeholder={placeholderOf(currentQuestion)}
+                        className="w-full rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[17px] leading-7 text-[#20315f] outline-none focus:border-[#5f7cff]"
+                      />
+                      <div className="mt-2 text-right text-xs text-[#91a0c8]">
+                        {currentAnswer?.type === 'long-text' ? currentAnswer.value.length : 0}/{currentQuestion.maxLength || 200}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  {currentQuestionIndex > 0 && (
+                    <button
+                      onClick={() => moveQuestion('prev')}
+                      className="w-full rounded-[18px] border border-[#dbe4ff] bg-white px-5 py-4 text-base font-semibold text-[#4d67d8]"
+                    >
+                      上一题
+                    </button>
+                  )}
+                  <button
+                    onClick={() => moveQuestion('next')}
+                    disabled={!activeQuestionAnswered}
+                    className="w-full rounded-[18px] bg-[linear-gradient(90deg,#5f7cff_0%,#6f86ff_100%)] px-5 py-4 text-base font-semibold text-white shadow-[0_14px_32px_rgba(92,120,241,0.28)] disabled:cursor-not-allowed disabled:bg-[#d8def5] disabled:shadow-none"
+                  >
+                    {currentQuestionIndex >= activeQuestionnaire.questions.length - 1 ? '完成本问卷' : '下一题'}
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <section className="mt-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <button className="flex h-9 w-9 items-center justify-center rounded-full border border-[#dbe4ff] text-lg text-[#4d67d8]">
+                    ←
+                  </button>
+                  <div className="text-center">
+                    <div className="text-[21px] font-semibold text-[#20315f]">问卷与预评估互动</div>
+                    <div className="mt-1 text-xs text-[#8a99c3]">患者端 · 接收并完成问卷</div>
+                  </div>
+                  <div className="h-9 w-9 rounded-full border border-transparent" />
+                </div>
+
+                <div className="rounded-[26px] border border-[#dbe4ff] bg-white px-4 py-5 shadow-[0_16px_42px_rgba(104,128,244,0.12)]">
+                  <h2 className="text-[28px] font-semibold text-[#20315f]">问卷与预评估</h2>
+                  <div className="mt-5 space-y-3 text-[15px] text-[#41598f]">
+                    <div className="flex items-center justify-between">
+                      <span>问卷交换号</span>
+                      <b className="font-semibold text-[#20315f]">{bundlePayload.exchangeId}</b>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>完成进度</span>
+                      <b className="font-semibold text-[#20315f]">{completedQuestionnaireCount}/{questionnaireCount}</b>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>已接收资料</span>
+                      <b className="font-semibold text-[#20315f]">{bundlePayload.mockFiles.length} 份</b>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 rounded-[20px] border border-[#dbe4ff] bg-[#f7f9ff] px-3 py-2">
+                    <div className="pb-2 text-[15px] font-semibold text-[#20315f]">待填写问卷</div>
+                    <div className="space-y-2">
+                      {questionnaires.map((item) => (
+                        <div key={item.id} className="flex items-center justify-between gap-3 rounded-[16px] bg-white px-3 py-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-[15px] font-medium text-[#20315f]">{item.label}</div>
+                            <div className="mt-1 text-xs text-[#8a99c3]">
+                              必填 {item.requiredDone}/{item.requiredTotal}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => openQuestionnaire(item.id)}
+                            className="rounded-[14px] border border-[#dbe4ff] px-4 py-2 text-sm font-semibold text-[#5f7cff]"
+                          >
+                            {item.completed ? '修改' : '去填写'}
+                          </button>
                         </div>
                       ))}
                     </div>
                   </div>
+
+                  <button
+                    onClick={generateSubmission}
+                    disabled={!canSubmit}
+                    className="mt-5 w-full rounded-[18px] bg-[linear-gradient(90deg,#5f7cff_0%,#6f86ff_100%)] px-5 py-4 text-base font-semibold text-white shadow-[0_14px_32px_rgba(92,120,241,0.28)] disabled:cursor-not-allowed disabled:bg-[#d8def5] disabled:shadow-none"
+                  >
+                    提交问卷并生成二维码
+                  </button>
+
+                  {!canSubmit && (
+                    <div className="mt-3 text-center text-xs leading-6 text-[#8a99c3]">
+                      请先完成全部必填题目，再生成回传二维码。
+                    </div>
+                  )}
+                </div>
+
+                {needsRegenerate && !submission && (
+                  <div className="rounded-[22px] border border-[#ffe1b0] bg-[#fff5e5] px-4 py-4 text-sm leading-6 text-[#9b6a17]">
+                    你刚刚修改了问卷答案，之前生成的二维码已失效，请重新点击“提交问卷并生成二维码”。
+                  </div>
                 )}
 
-                <div className="space-y-4">
-                  {questions.map((question) => {
-                    const answer = answers[keyOf(question)];
-                    return (
-                      <div key={keyOf(question)} className="rounded-2xl border border-slate-200 p-4">
-                        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                          <label className="block text-sm font-semibold text-slate-900">
-                            {question.id}. {question.title}
-                            {question.required && <span className="ml-1 text-rose-500">*</span>}
-                          </label>
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] text-slate-600">
-                            {question.templateLabel}
-                          </span>
-                        </div>
-                        {question.type === 'single' && (
-                          <div className="space-y-2">
-                            {question.options?.map((option) => (
-                              <label key={option.id} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                                <input
-                                  type="radio"
-                                  name={keyOf(question)}
-                                  checked={answer?.type === 'single' && answer.value === option.id}
-                                  onChange={() => updateAnswer(question, { type: 'single', value: option.id })}
-                                  className="h-4 w-4 accent-sky-600"
-                                />
-                                <span>{option.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                        {question.type === 'multiple' && (
-                          <div className="space-y-2">
-                            {question.options?.map((option) => {
-                              const current = answer?.type === 'multiple' ? answer.value : [];
-                              return (
-                                <label key={option.id} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                                  <input
-                                    type="checkbox"
-                                    checked={current.includes(option.id)}
-                                    onChange={(event) => {
-                                      const next = event.target.checked
-                                        ? [...current, option.id]
-                                        : current.filter((item) => item !== option.id);
-                                      updateAnswer(question, next.length > 0 ? { type: 'multiple', value: next, strategy: 'list' } : undefined);
-                                    }}
-                                    className="h-4 w-4 accent-sky-600"
-                                  />
-                                  <span>{option.label}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        )}
-                        {question.type === 'numeric' && (
-                          <input
-                            type="number"
-                            value={answer?.type === 'numeric' ? answer.value : ''}
-                            min={question.min}
-                            max={question.max}
-                            onChange={(event) => updateAnswer(
-                              question,
-                              event.target.value === '' ? undefined : { type: 'numeric', value: Number(event.target.value) }
-                            )}
-                            placeholder={placeholderOf(question)}
-                            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-sky-400"
-                          />
-                        )}
-                        {(question.type === 'text' || question.type === 'long-text') && (
-                          <>
-                            <textarea
-                              value={(answer?.type === 'text' || answer?.type === 'long-text') ? answer.value : ''}
-                              rows={question.type === 'long-text' ? 5 : 3}
-                              maxLength={question.maxLength || 200}
-                              onChange={(event) => updateAnswer(
-                                question,
-                                event.target.value === ''
-                                  ? undefined
-                                  : question.type === 'text'
-                                    ? { type: 'text', value: event.target.value }
-                                    : { type: 'long-text', value: event.target.value }
-                              )}
-                              placeholder={placeholderOf(question)}
-                              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-sky-400"
-                            />
-                            <div className="mt-2 text-right text-xs text-slate-500">
-                              {(answer?.type === 'text' || answer?.type === 'long-text') ? answer.value.length : 0} / {question.maxLength || 200}
-                            </div>
-                          </>
-                        )}
+                {submission && (
+                  <div className="rounded-[26px] border border-[#dbe4ff] bg-white px-4 py-5 shadow-[0_16px_42px_rgba(104,128,244,0.12)]">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[20px] font-semibold text-[#20315f]">问卷回传二维码</div>
+                        <div className="mt-1 text-xs text-[#8a99c3]">{modeText(submission.mode)} · 修改答案后需重新生成</div>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
+                      <button
+                        onClick={generateSubmission}
+                        className="rounded-[14px] border border-[#dbe4ff] px-4 py-2 text-sm font-semibold text-[#5f7cff]"
+                      >
+                        重新生成
+                      </button>
+                    </div>
 
-            <aside className="space-y-6">
-              <section className="rounded-3xl bg-white p-6 shadow-sm">
-                <h2 className="text-xl font-bold text-slate-900">回传摘要</h2>
-                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-2xl bg-slate-950 p-4 text-slate-100">必填完成：{requiredDone} / {requiredTotal}</div>
-                  <div className="rounded-2xl bg-sky-50 p-4 text-sky-900">已答题数：{answerEntries.length}</div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (!bundlePayload) return;
-                    const answerEnvelope = buildOfflineImportEnvelope({
-                      exchangeId: bundlePayload.exchangeId,
-                      maskUuid: bundlePayload.maskUuid,
-                      templateIds: bundlePayload.templateIds,
-                      answers: answerEntries,
-                    });
-                    const qrTransport = buildLtQrTransport(answerEnvelope.payload);
-                    setSubmission({
-                      ...answerEnvelope,
-                      ...qrTransport,
-                    });
-                  }}
-                  disabled={!canSubmit}
-                  className="mt-5 w-full rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-                >
-                  生成回传码
-                </button>
-                <p className="mt-3 text-sm leading-6 text-slate-500">
-                  回传时只带 `exchangeId`、`maskUuid`、`templateIds` 和答案值。医院端使用同一套 LT 二维码解码能力导入。
-                </p>
-              </section>
+                    <div className="mt-5 flex justify-center rounded-[24px] bg-[#f7f9ff] px-4 py-4">
+                      <QrCodeDisplay
+                        data={submission.frames[submission.mode === 'single' ? 0 : submissionFrameIndex] || ''}
+                        size={236}
+                        border={4}
+                        className="w-full max-w-[250px]"
+                      />
+                    </div>
 
-              {submission && (
-                <section className="rounded-3xl bg-white p-6 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <h2 className="text-xl font-bold text-slate-900">回传载荷</h2>
-                    <div className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{modeText(submission.mode)}</div>
-                  </div>
-                  <div className="mt-4 grid grid-cols-3 gap-3 text-xs text-slate-600">
-                    <div className="rounded-2xl bg-slate-50 p-3">压缩后 {submission.payloadBytes} bytes</div>
-                    <div className="rounded-2xl bg-slate-50 p-3">预计 {submission.estimatedFrames} 帧</div>
-                    <div className="rounded-2xl bg-slate-50 p-3">answerSheet 已生成</div>
-                  </div>
-                  <div className="mt-5 flex justify-center">
-                    <QrCodeDisplay
-                      data={submission.frames[submission.mode === 'single' ? 0 : submissionFrameIndex] || ''}
-                      size={260}
-                      border={4}
-                      className="max-w-sm"
-                    />
-                  </div>
-                  <div className="mt-3 text-center text-xs text-slate-500">
-                    {submission.mode === 'single'
-                      ? '单帧二维码，可直接给院内导入页扫码'
-                      : `第 ${submissionFrameIndex + 1}/${submission.frames.length} 帧 · 自动轮播中`}
-                  </div>
-                  <pre className="mt-5 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-200">
-                    {JSON.stringify(submission.payload, null, 2)}
-                  </pre>
-                </section>
-              )}
+                    <div className="mt-3 text-center text-xs leading-6 text-[#8a99c3]">
+                      {submission.mode === 'single'
+                        ? '请把这张二维码给院内端扫码导入。'
+                        : `正在轮播第 ${submissionFrameIndex + 1}/${submission.frames.length} 帧，请保持手机亮屏给院内端连续扫码。`}
+                    </div>
 
-              <section className="rounded-3xl bg-white p-6 shadow-sm">
-                <h2 className="text-xl font-bold text-slate-900">入口</h2>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <Link href="/" className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">返回首页</Link>
-                  <Link href="/hospital" className="rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white">打开医院导入页</Link>
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-[#6075ae]">
+                      <div className="rounded-[16px] bg-[#f7f9ff] px-2 py-3">必填 {requiredDone}/{requiredTotal}</div>
+                      <div className="rounded-[16px] bg-[#f7f9ff] px-2 py-3">压缩后 {submission.payloadBytes} bytes</div>
+                      <div className="rounded-[16px] bg-[#f7f9ff] px-2 py-3">预计 {submission.estimatedFrames} 帧</div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-[22px] border border-[#dbe4ff] bg-white px-4 py-4 text-sm leading-7 text-[#667ab1]">
+                  已接收 {questions.length} 道题，回传载荷会携带每一道题对应的预问诊字段 key，院内端可直接关联到 N2 采集表单。
                 </div>
               </section>
-            </aside>
+            )}
           </div>
+        </div>
       </div>
     </main>
   );

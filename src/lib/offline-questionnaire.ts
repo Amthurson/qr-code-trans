@@ -92,6 +92,7 @@ export function serializeOfflineAnswers(
       const [templateId, questionId] = key.split(':');
       return {
         templateId,
+        fieldKey: '',
         questionId: Number(questionId),
         questionType: answer.type as QuestionType,
         value: normalizeAnswerValue(answer),

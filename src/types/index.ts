@@ -156,7 +156,10 @@ export interface OfflineIssuePayload {
 
 export interface OfflineAnswerEntry {
   templateId: string;
+  templateLabel?: string;
   questionId: number;
+  questionTitle?: string;
+  fieldKey: string;
   questionType: QuestionType;
   value: string | number | string[];
 }
@@ -179,6 +182,7 @@ export interface OfflineQuestionnaireBundle {
 }
 
 export interface QuestionnaireTransferQuestion extends Question {
+  key: string;
   templateId: string;
   templateLabel: string;
   sourceTemplateIds?: string[];
