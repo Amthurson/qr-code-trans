@@ -186,6 +186,9 @@ export function useQrScanner(options: UseQrScannerOptions = {}): UseQrScannerRet
       }
     } catch (e) {
       console.error('处理二维码失败:', e)
+      const scanError = e instanceof Error ? e : new Error('二维码处理失败')
+      setError(scanError)
+      onError?.(scanError)
     }
   }, [onDecoded, stopScan])
 

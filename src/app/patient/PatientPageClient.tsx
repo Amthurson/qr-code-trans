@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import QrCodeDisplay from '@/components/QrCodeDisplay';
 import { useQrScanner } from '@/hooks/useQrScanner';
@@ -94,6 +94,7 @@ export default function PatientPageClient() {
     isScanning,
     progress,
     isComplete,
+    decodedData,
     error,
     lastDetectedAt,
     startScan,
@@ -102,36 +103,45 @@ export default function PatientPageClient() {
     reset,
   } = useQrScanner({
     onDecoded: (data) => {
-      try {
-        const text = new TextDecoder().decode(data);
-        const parsed = JSON.parse(text);
-        if (!isQuestionnaireBundlePayload(parsed)) {
-          throw new Error('当前二维码不是问卷下发包');
-        }
-        setBundlePayload(parsed);
-        setIssue({
-          version: parsed.version,
-          transport: 'public-link',
-          exchangeId: parsed.exchangeId,
-          maskUuid: parsed.maskUuid,
-          bundleId: parsed.bundleId,
-          templateIds: parsed.templateIds,
-        });
-        setIssueSource('bundle');
-        setIssueWarning('');
-        setIssueError('');
-        setReceiveError('');
-        setAnswers({});
-        setSubmission(null);
-      } catch (decodeError) {
-        setReceiveError(decodeError instanceof Error ? decodeError.message : '问卷内容解析失败');
-      }
+      applyBundlePayload(data);
     },
     onError: (scanError) => {
       setReceiveError(scanError.message);
     },
     maxScansPerSecond: 30,
   });
+
+  const applyBundlePayload = useCallback((data: Uint8Array) => {
+    try {
+      const text = new TextDecoder().decode(data);
+      const parsed = JSON.parse(text);
+      if (!isQuestionnaireBundlePayload(parsed)) {
+        throw new Error('当前二维码不是问卷下发包');
+      }
+      setBundlePayload(parsed);
+      setIssue({
+        version: parsed.version,
+        transport: 'public-link',
+        exchangeId: parsed.exchangeId,
+        maskUuid: parsed.maskUuid,
+        bundleId: parsed.bundleId,
+        templateIds: parsed.templateIds,
+      });
+      setIssueSource('bundle');
+      setIssueWarning('');
+      setIssueError('');
+      setReceiveError('');
+      setAnswers({});
+      setSubmission(null);
+    } catch (decodeError) {
+      setReceiveError(decodeError instanceof Error ? decodeError.message : '问卷内容解析失败');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!decodedData || bundlePayload) return;
+    applyBundlePayload(decodedData);
+  }, [applyBundlePayload, bundlePayload, decodedData]);
 
   useEffect(() => {
     if (!bundleFrame) return;
@@ -214,10 +224,7 @@ export default function PatientPageClient() {
           <div className="relative flex flex-1 items-center justify-center px-5 py-4">
             {isScanning && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="relative h-[62vmin] w-[62vmin] max-h-[72vh] max-w-[72vw] min-h-[260px] min-w-[260px]">
-                  <div className={`absolute inset-0 rounded-[36px] border-2 transition-all duration-150 ${
-                    reticleActive ? 'border-emerald-300 shadow-[0_0_0_2px_rgba(110,231,183,0.22),0_0_26px_rgba(110,231,183,0.48)]' : 'border-white/75 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
-                  }`} />
+                <div className="relative h-[58vmin] w-[58vmin] max-h-[68vh] max-w-[68vw] min-h-[220px] min-w-[220px]">
                   <div className={`absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-colors ${
                     reticleActive ? 'border-emerald-300 bg-emerald-300/12' : 'border-sky-200/90 bg-sky-200/8'
                   }`} />
@@ -226,6 +233,12 @@ export default function PatientPageClient() {
                   }`} />
                   <div className={`absolute left-1/2 top-1/2 h-24 w-px -translate-x-1/2 -translate-y-1/2 transition-colors ${
                     reticleActive ? 'bg-emerald-300' : 'bg-sky-100/90'
+                  }`} />
+                  <div className={`absolute inset-x-[18%] top-[16%] h-px transition-colors ${
+                    reticleActive ? 'bg-emerald-300/45' : 'bg-white/20'
+                  }`} />
+                  <div className={`absolute inset-x-[18%] bottom-[16%] h-px transition-colors ${
+                    reticleActive ? 'bg-emerald-300/45' : 'bg-white/20'
                   }`} />
                 </div>
               </div>
@@ -274,9 +287,14 @@ export default function PatientPageClient() {
                 <div className="rounded-2xl bg-black/20 p-3">已解码 {progress.decoded}</div>
                 <div className="rounded-2xl bg-black/20 p-3">已接收 {progress.encoded}</div>
               </div>
-              {bundleFrame && (
+              {bundleFrame && progress.percent < 100 && (
                 <div className="mt-4 rounded-2xl bg-emerald-500/14 px-4 py-3 text-sm text-emerald-100">
                   已收到入口帧，继续扫描同一组喷泉码即可完成整包接收。
+                </div>
+              )}
+              {isComplete && !bundlePayload && !receiveError && (
+                <div className="mt-4 rounded-2xl bg-sky-500/14 px-4 py-3 text-sm text-sky-100">
+                  问卷数据已接收完成，正在打开表单。
                 </div>
               )}
               {isScanning && (
