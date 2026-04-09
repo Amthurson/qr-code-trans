@@ -76,6 +76,16 @@ export default function PatientPageClient() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [needsRegenerate, setNeedsRegenerate] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [modalQrSize, setModalQrSize] = useState(320);
+
+  useEffect(() => {
+    const updateModalQrSize = () => {
+      setModalQrSize(Math.max(240, Math.min(window.innerWidth - 48, 420)));
+    };
+    updateModalQrSize();
+    window.addEventListener('resize', updateModalQrSize);
+    return () => window.removeEventListener('resize', updateModalQrSize);
+  }, []);
 
   useEffect(() => {
     if (!ticket) {
@@ -124,6 +134,7 @@ export default function PatientPageClient() {
       setReceiveError('');
       setAnswers({});
       setSubmission(null);
+      setShowQrModal(false);
       setActiveQuestionnaireId(null);
       setCurrentQuestionIndex(0);
       setNeedsRegenerate(false);
@@ -180,14 +191,14 @@ export default function PatientPageClient() {
         const groupQuestions = questions.filter((question) => question.templateId === templateId);
         if (!groupQuestions.length) return null;
         const requiredTotal = groupQuestions.filter((question) => question.required).length;
-        const requiredDone = groupQuestions.filter((question) => isFilled(answers[keyOf(question)])).length;
+        const requiredDone = groupQuestions.filter((question) => question.required && isFilled(answers[keyOf(question)])).length;
         return {
           id: templateId,
           label: groupQuestions[0]?.templateLabel || templateId,
           questions: groupQuestions,
           requiredTotal,
           requiredDone,
-          completed: requiredTotal > 0 && requiredTotal > requiredDone,
+          completed: requiredTotal === 0 || requiredDone >= requiredTotal,
         };
       })
       .filter(Boolean) as QuestionnaireGroup[];
@@ -203,8 +214,8 @@ export default function PatientPageClient() {
   const questionnaireCount = questionnaires.length;
   const completedQuestionnaireCount = questionnaires.filter((item) => item.completed).length;
   const requiredTotal = questions.filter((question) => question.required).length;
-  const requiredDone = questions.filter((question) => isFilled(answers[keyOf(question)])).length;
-  const canSubmit = Boolean(bundlePayload) && requiredTotal > 0 && requiredTotal === requiredDone;
+  const requiredDone = questions.filter((question) => question.required && isFilled(answers[keyOf(question)])).length;
+  const canSubmit = Boolean(bundlePayload) && requiredDone >= requiredTotal;
 
   useEffect(() => {
     setSubmissionFrameIndex(0);
@@ -252,6 +263,7 @@ export default function PatientPageClient() {
     });
     if (submission) {
       setSubmission(null);
+      setShowQrModal(false);
       setNeedsRegenerate(true);
     }
   }, [submission]);
@@ -295,6 +307,7 @@ export default function PatientPageClient() {
       ...answerEnvelope,
       ...qrTransport,
     });
+    setShowQrModal(true);
     setNeedsRegenerate(false);
   }, [answerEntries, bundlePayload]);
 
@@ -782,7 +795,7 @@ export default function PatientPageClient() {
                         <div className="flex w-full justify-center bg-[#f7f9ff] p-6 rounded-2xl">
                           <QrCodeDisplay
                             data={submission.frames[submission.mode === 'single' ? 0 : submissionFrameIndex] || ''}
-                            size={360}
+                            size={modalQrSize}
                             border={4}
                             className="w-full"
                           />
