@@ -75,6 +75,7 @@ export default function PatientPageClient() {
   const [activeQuestionnaireId, setActiveQuestionnaireId] = useState<string | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [needsRegenerate, setNeedsRegenerate] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   useEffect(() => {
     if (!ticket) {
@@ -186,7 +187,7 @@ export default function PatientPageClient() {
           questions: groupQuestions,
           requiredTotal,
           requiredDone,
-          completed: requiredTotal > 0 && requiredTotal === requiredDone,
+          completed: requiredTotal > 0 && requiredTotal > requiredDone,
         };
       })
       .filter(Boolean) as QuestionnaireGroup[];
@@ -682,7 +683,7 @@ export default function PatientPageClient() {
                           <div className="min-w-0">
                             <div className="truncate text-[15px] font-medium text-[#20315f]">{item.label}</div>
                             <div className="mt-1 text-xs text-[#8a99c3]">
-                              必填 {item.requiredDone}/{item.requiredTotal}
+                              必填 {item.requiredDone > item.requiredTotal ? item.requiredTotal : item.requiredDone}/{item.requiredTotal}
                             </div>
                           </div>
                           <button
@@ -722,7 +723,7 @@ export default function PatientPageClient() {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <div className="text-[20px] font-semibold text-[#20315f]">问卷回传二维码</div>
-                        <div className="mt-1 text-xs text-[#8a99c3]">{modeText(submission.mode)} · 修改答案后需重新生成</div>
+                          <div className="mt-1 text-xs text-[#8a99c3]">{modeText(submission.mode)} · 点击二维码可全屏显示</div>
                       </div>
                       <button
                         onClick={generateSubmission}
@@ -732,19 +733,24 @@ export default function PatientPageClient() {
                       </button>
                     </div>
 
-                    <div className="mt-5 flex justify-center rounded-[24px] bg-[#f7f9ff] px-4 py-4">
+                    <div className="mt-5 flex justify-center rounded-3xl bg-[#f7f9ff] px-4 py-4">
+                        <button
+                          onClick={() => setShowQrModal(true)}
+                          className="cursor-pointer rounded-2xl transition hover:opacity-80"
+                        >
                       <QrCodeDisplay
                         data={submission.frames[submission.mode === 'single' ? 0 : submissionFrameIndex] || ''}
                         size={236}
                         border={4}
                         className="w-full max-w-[250px]"
                       />
+                        </button>
                     </div>
 
                     <div className="mt-3 text-center text-xs leading-6 text-[#8a99c3]">
-                      {submission.mode === 'single'
-                        ? '请把这张二维码给院内端扫码导入。'
-                        : `正在轮播第 ${submissionFrameIndex + 1}/${submission.frames.length} 帧，请保持手机亮屏给院内端连续扫码。`}
+                        {submission.mode === 'single'
+                          ? '请把这张二维码给院内端扫码导入（点击二维码可全屏显示）。'
+                          : `正在轮播第 ${submissionFrameIndex + 1}/${submission.frames.length} 帧，请保持手机亮屏给院内端连续扫码（点击可全屏显示）。`}
                     </div>
 
                     <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-[#6075ae]">
@@ -754,6 +760,49 @@ export default function PatientPageClient() {
                     </div>
                   </div>
                 )}
+
+                  {/* 二维码全屏弹窗 */}
+                  {showQrModal && submission && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 sm:p-0">
+                      <div className="relative w-full max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl sm:max-w-[500px]">
+                        <button
+                          onClick={() => setShowQrModal(false)}
+                          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-[#f0f4ff] text-[#5f7cff] hover:bg-[#e6ebff]"
+                        >
+                          ✕
+                        </button>
+
+                        <div className="mb-6 text-center pr-8">
+                          <div className="text-xl font-semibold text-[#20315f]">{modeText(submission.mode)}</div>
+                          {submission.mode === 'fountain' && (
+                            <div className="mt-2 text-sm text-[#8a99c3]">第 {submissionFrameIndex + 1}/{submission.frames.length} 帧</div>
+                          )}
+                        </div>
+
+                        <div className="flex w-full justify-center bg-[#f7f9ff] p-6 rounded-2xl">
+                          <QrCodeDisplay
+                            data={submission.frames[submission.mode === 'single' ? 0 : submissionFrameIndex] || ''}
+                            size={360}
+                            border={4}
+                            className="w-full"
+                          />
+                        </div>
+
+                        <div className="mt-6 text-center text-sm leading-6 text-[#8a99c3]">
+                          {submission.mode === 'single'
+                            ? '请将二维码给院内端扫码导入。'
+                            : '请保持手机亮屏给院内端连续扫码。'}
+                        </div>
+
+                        <button
+                          onClick={() => setShowQrModal(false)}
+                          className="mt-6 w-full rounded-xl bg-[linear-gradient(90deg,#5f7cff_0%,#6f86ff_100%)] py-3 text-white font-semibold hover:shadow-lg transition"
+                        >
+                          关闭
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                 <div className="rounded-[22px] border border-[#dbe4ff] bg-white px-4 py-4 text-sm leading-7 text-[#667ab1]">
                   已接收 {questions.length} 道题，回传载荷会携带每一道题对应的预问诊字段 key，院内端可直接关联到 N2 采集表单。
