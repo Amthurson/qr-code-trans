@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { pipeline } from '@xenova/transformers';
 import QrCodeDisplay from '@/components/QrCodeDisplay';
 import { useQrScanner } from '@/hooks/useQrScanner';
 import {
@@ -77,6 +78,13 @@ export default function PatientPageClient() {
   const [needsRegenerate, setNeedsRegenerate] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [modalQrSize, setModalQrSize] = useState(320);
+  // 语音识别相关状态
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionStatus, setTranscriptionStatus] = useState('');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const transcriberRef = useRef<any>(null);
+  const isRecordingRef = useRef(false);
 
   useEffect(() => {
     const updateModalQrSize = () => {
@@ -85,6 +93,31 @@ export default function PatientPageClient() {
     updateModalQrSize();
     window.addEventListener('resize', updateModalQrSize);
     return () => window.removeEventListener('resize', updateModalQrSize);
+  }, []);
+
+  // 初始化语音识别器
+  useEffect(() => {
+    const initTranscriber = async () => {
+      try {
+        setTranscriptionStatus('正在加载语音模型...');
+        transcriberRef.current = await pipeline(
+          'automatic-speech-recognition',
+          'Xenova/whisper-tiny'
+        );
+        setTranscriptionStatus('');
+      } catch (error) {
+        console.error('语音模型加载失败:', error);
+        setTranscriptionStatus('语音模型加载失败');
+      }
+    };
+
+    initTranscriber();
+
+    return () => {
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -310,6 +343,90 @@ export default function PatientPageClient() {
     setShowQrModal(true);
     setNeedsRegenerate(false);
   }, [answerEntries, bundlePayload]);
+
+  // 语音输入切换函数
+  const toggleVoiceInput = useCallback(async () => {
+    if (!currentQuestion || (currentQuestion.type !== 'long-text' && currentQuestion.type !== 'text')) return;
+    
+    if (isRecordingRef.current) {
+      // 停止录音
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+      }
+      return;
+    }
+
+    if (!transcriberRef.current) {
+      setTranscriptionStatus('语音模型尚未加载完成');
+      return;
+    }
+
+    try {
+      setTranscriptionStatus('正在请求麦克风权限...');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      isRecordingRef.current = true;
+      setIsTranscribing(true);
+      setTranscriptionStatus('正在录音...（点击麦克风停止）');
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        isRecordingRef.current = false;
+        setIsTranscribing(false);
+        
+        // 停止所有音轨
+        stream.getTracks().forEach(track => track.stop());
+        
+        if (audioChunksRef.current.length === 0) {
+          setTranscriptionStatus('');
+          return;
+        }
+
+        try {
+          setTranscriptionStatus('正在识别语音...');
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const result = await transcriberRef.current(audioBlob);
+          
+          // 根据问题类型更新答案
+          if (currentQuestion.type === 'long-text') {
+            const currentValue = currentAnswer?.type === 'long-text' ? currentAnswer.value : '';
+            const newValue = currentValue + (currentValue ? ' ' : '') + result.text;
+            updateAnswer(currentQuestion, { type: 'long-text', value: newValue });
+          } else if (currentQuestion.type === 'text') {
+            // text 类型直接替换内容
+            updateAnswer(currentQuestion, { type: 'text', value: result.text });
+          }
+          
+          setTranscriptionStatus('');
+        } catch (error) {
+          console.error('语音识别失败:', error);
+          setTranscriptionStatus('语音识别失败，请重试');
+        }
+      };
+
+      mediaRecorder.start();
+      
+      // 自动停止录音（5秒后）
+      setTimeout(() => {
+        if (isRecordingRef.current && mediaRecorderRef.current) {
+          mediaRecorderRef.current.stop();
+        }
+      }, 5000);
+      
+    } catch (error) {
+      console.error('麦克风访问失败:', error);
+      setTranscriptionStatus('无法访问麦克风，请检查权限');
+      setIsTranscribing(false);
+    }
+  }, [currentQuestion, currentAnswer, updateAnswer]);
 
   const activeQuestionAnswered = currentQuestion ? !currentQuestion.required || isFilled(currentAnswer) : false;
   const mobileFrameClasses = 'mx-auto min-h-screen w-full max-w-[390px] bg-white sm:min-h-[820px] sm:rounded-[38px] sm:border sm:border-[#cfd9ff] sm:shadow-[0_28px_90px_rgba(82,112,228,0.18)]';
@@ -601,41 +718,66 @@ export default function PatientPageClient() {
                   )}
 
                   {currentQuestion.type === 'text' && (
-                    <div className="pt-2">
-                      <input
-                        type="text"
-                        value={currentAnswer?.type === 'text' ? currentAnswer.value : ''}
-                        maxLength={currentQuestion.maxLength || 80}
-                        onChange={(event) => {
-                          updateAnswer(
-                            currentQuestion,
-                            event.target.value === '' ? undefined : { type: 'text', value: event.target.value },
-                          );
-                        }}
-                        placeholder={placeholderOf(currentQuestion)}
-                        className="w-full rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[18px] text-[#20315f] outline-none focus:border-[#5f7cff]"
-                      />
+                    <div className="pt-2 relative">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={currentAnswer?.type === 'text' ? currentAnswer.value : ''}
+                          maxLength={currentQuestion.maxLength || 80}
+                          onChange={(event) => {
+                            updateAnswer(
+                              currentQuestion,
+                              event.target.value === '' ? undefined : { type: 'text', value: event.target.value },
+                            );
+                          }}
+                          placeholder={placeholderOf(currentQuestion)}
+                          className="flex-1 rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[18px] text-[#20315f] outline-none focus:border-[#5f7cff]"
+                        />
+                        <button
+                          onClick={toggleVoiceInput}
+                          disabled={isTranscribing || !!transcriptionStatus}
+                          className={`h-fit w-12 flex-shrink-0 rounded-full p-3 transition-all ${isTranscribing ? 'bg-red-500 text-white animate-pulse' : 'bg-[#e8edff] text-[#5f7cff] hover:bg-[#dbe4ff]'} ${transcriptionStatus ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          title={isTranscribing ? '点击停止录音' : '点击开始语音输入'}
+                        >
+                          {isTranscribing ? '⏹️' : '🎤'}
+                        </button>
+                      </div>
                     </div>
                   )}
 
                   {currentQuestion.type === 'long-text' && (
-                    <div className="pt-2">
-                      <textarea
-                        rows={6}
-                        value={currentAnswer?.type === 'long-text' ? currentAnswer.value : ''}
-                        maxLength={currentQuestion.maxLength || 200}
-                        onChange={(event) => {
-                          updateAnswer(
-                            currentQuestion,
-                            event.target.value === '' ? undefined : { type: 'long-text', value: event.target.value },
-                          );
-                        }}
-                        placeholder={placeholderOf(currentQuestion)}
-                        className="w-full rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[17px] leading-7 text-[#20315f] outline-none focus:border-[#5f7cff]"
-                      />
+                    <div className="pt-2 relative">
+                      <div className="flex items-start gap-2">
+                        <textarea
+                          rows={6}
+                          value={currentAnswer?.type === 'long-text' ? currentAnswer.value : ''}
+                          maxLength={currentQuestion.maxLength || 200}
+                          onChange={(event) => {
+                            updateAnswer(
+                              currentQuestion,
+                              event.target.value === '' ? undefined : { type: 'long-text', value: event.target.value },
+                            );
+                          }}
+                          placeholder={placeholderOf(currentQuestion)}
+                          className="flex-1 rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[17px] leading-7 text-[#20315f] outline-none focus:border-[#5f7cff]"
+                        />
+                        <button
+                          onClick={toggleVoiceInput}
+                          disabled={isTranscribing || !!transcriptionStatus}
+                          className={`h-fit w-12 flex-shrink-0 rounded-full p-3 transition-all ${isTranscribing ? 'bg-red-500 text-white animate-pulse' : 'bg-[#e8edff] text-[#5f7cff] hover:bg-[#dbe4ff]'} ${transcriptionStatus ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          title={isTranscribing ? '点击停止录音' : '点击开始语音输入'}
+                        >
+                          {isTranscribing ? '⏹️' : '🎤'}
+                        </button>
+                      </div>
                       <div className="mt-2 text-right text-xs text-[#91a0c8]">
                         {currentAnswer?.type === 'long-text' ? currentAnswer.value.length : 0}/{currentQuestion.maxLength || 200}
                       </div>
+                      {transcriptionStatus && (
+                        <div className="mt-2 text-xs text-[#5f7cff]">
+                          {transcriptionStatus}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
