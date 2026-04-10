@@ -83,7 +83,8 @@ export default function PatientPageClient() {
   const [transcriptionStatus, setTranscriptionStatus] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const transcriberRef = useRef<any>(null);
+  // @ts-expect-error - Xenova pipeline 实例没有明确类型定义
+  const transcriberRef = useRef<Any>(null);
   const isRecordingRef = useRef(false);
 
   useEffect(() => {
@@ -457,7 +458,7 @@ export default function PatientPageClient() {
           <div className="relative flex flex-1 items-center justify-center px-5 py-4">
             {isScanning && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="relative h-[58vmin] w-[58vmin] max-h-[68vh] max-w-[68vw] min-h-[220px] min-w-[220px]">
+                <div className="relative h-[58vmin] w-[58vmin] max-h-[68vh] max-w-[68vw] min-h-55 min-w-55">
                   <div className={`absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-colors ${
                     reticleActive ? 'border-emerald-300 bg-emerald-300/12' : 'border-sky-200/90 bg-sky-200/8'
                   }`} />
