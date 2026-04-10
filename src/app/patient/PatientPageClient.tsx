@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { pipeline } from '@xenova/transformers';
 import QrCodeDisplay from '@/components/QrCodeDisplay';
 import { useQrScanner } from '@/hooks/useQrScanner';
 import {
@@ -36,6 +35,12 @@ interface QuestionnaireGroup {
   requiredDone: number;
   completed: boolean;
 }
+
+interface TranscriberResult {
+  text: string;
+}
+
+type AudioTranscriber = (audio: unknown) => Promise<TranscriberResult>;
 
 function keyOf(question: QuestionnaireTransferQuestion): string {
   return `${question.templateId}:${question.id}`;
@@ -83,8 +88,7 @@ export default function PatientPageClient() {
   const [transcriptionStatus, setTranscriptionStatus] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  // @ts-expect-error - Xenova pipeline 实例没有明确类型定义
-  const transcriberRef = useRef<Any>(null);
+  const transcriberRef = useRef<unknown>(null);
   const isRecordingRef = useRef(false);
 
   useEffect(() => {
@@ -101,6 +105,7 @@ export default function PatientPageClient() {
     const initTranscriber = async () => {
       try {
         setTranscriptionStatus('正在加载语音模型...');
+        const { pipeline } = await import('@xenova/transformers');
         transcriberRef.current = await pipeline(
           'automatic-speech-recognition',
           'Xenova/whisper-tiny'
@@ -216,7 +221,7 @@ export default function PatientPageClient() {
     return () => window.clearTimeout(timer);
   }, [lastDetectedAt]);
 
-  const questions = bundlePayload?.questions || [];
+  const questions = useMemo(() => bundlePayload?.questions || [], [bundlePayload]);
 
   const questionnaires = useMemo(() => {
     if (!bundlePayload) return [] as QuestionnaireGroup[];
@@ -394,7 +399,12 @@ export default function PatientPageClient() {
         try {
           setTranscriptionStatus('正在识别语音...');
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          const result = await transcriberRef.current(audioBlob);
+          const transcriber = transcriberRef.current as AudioTranscriber | null;
+          if (!transcriber) {
+            setTranscriptionStatus('语音模型尚未加载完成');
+            return;
+          }
+          const result = await transcriber(audioBlob);
           
           // 根据问题类型更新答案
           if (currentQuestion.type === 'long-text') {
