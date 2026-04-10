@@ -89,6 +89,7 @@ export default function PatientPageClient() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const transcriberRef = useRef<unknown>(null);
+  const transcriberInitPromiseRef = useRef<Promise<void> | null>(null);
   const isRecordingRef = useRef(false);
 
   useEffect(() => {
@@ -100,30 +101,39 @@ export default function PatientPageClient() {
     return () => window.removeEventListener('resize', updateModalQrSize);
   }, []);
 
-  // 初始化语音识别器
   useEffect(() => {
-    const initTranscriber = async () => {
-      try {
-        setTranscriptionStatus('正在加载语音模型...');
-        const { pipeline } = await import('@xenova/transformers');
-        transcriberRef.current = await pipeline(
-          'automatic-speech-recognition',
-          'Xenova/whisper-tiny'
-        );
-        setTranscriptionStatus('');
-      } catch (error) {
-        console.error('语音模型加载失败:', error);
-        setTranscriptionStatus('语音模型加载失败');
-      }
-    };
-
-    initTranscriber();
-
     return () => {
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.stop();
       }
     };
+  }, []);
+
+  const ensureTranscriber = useCallback(async (): Promise<AudioTranscriber> => {
+    if (transcriberRef.current) {
+      return transcriberRef.current as AudioTranscriber;
+    }
+
+    if (!transcriberInitPromiseRef.current) {
+      setTranscriptionStatus('正在加载语音模型...');
+      transcriberInitPromiseRef.current = (async () => {
+        const { pipeline } = await import('@xenova/transformers');
+        transcriberRef.current = await pipeline(
+          'automatic-speech-recognition',
+          'Xenova/whisper-tiny'
+        );
+      })().finally(() => {
+        transcriberInitPromiseRef.current = null;
+      });
+    }
+
+    await transcriberInitPromiseRef.current;
+    const transcriber = transcriberRef.current as AudioTranscriber | null;
+    if (!transcriber) {
+      throw new Error('语音模型尚未加载完成');
+    }
+    setTranscriptionStatus('');
+    return transcriber;
   }, []);
 
   useEffect(() => {
@@ -362,12 +372,8 @@ export default function PatientPageClient() {
       return;
     }
 
-    if (!transcriberRef.current) {
-      setTranscriptionStatus('语音模型尚未加载完成');
-      return;
-    }
-
     try {
+      await ensureTranscriber();
       setTranscriptionStatus('正在请求麦克风权限...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
@@ -399,11 +405,7 @@ export default function PatientPageClient() {
         try {
           setTranscriptionStatus('正在识别语音...');
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          const transcriber = transcriberRef.current as AudioTranscriber | null;
-          if (!transcriber) {
-            setTranscriptionStatus('语音模型尚未加载完成');
-            return;
-          }
+          const transcriber = await ensureTranscriber();
           const result = await transcriber(audioBlob);
           
           // 根据问题类型更新答案
@@ -433,11 +435,11 @@ export default function PatientPageClient() {
       }, 5000);
       
     } catch (error) {
-      console.error('麦克风访问失败:', error);
-      setTranscriptionStatus('无法访问麦克风，请检查权限');
+      console.error('语音输入初始化失败:', error);
+      setTranscriptionStatus(error instanceof Error ? error.message : '语音输入暂不可用，请稍后重试');
       setIsTranscribing(false);
     }
-  }, [currentQuestion, currentAnswer, updateAnswer]);
+  }, [currentQuestion, currentAnswer, ensureTranscriber, updateAnswer]);
 
   const activeQuestionAnswered = currentQuestion ? !currentQuestion.required || isFilled(currentAnswer) : false;
   const mobileFrameClasses = 'mx-auto min-h-screen w-full max-w-[390px] bg-white sm:min-h-[820px] sm:rounded-[38px] sm:border sm:border-[#cfd9ff] sm:shadow-[0_28px_90px_rgba(82,112,228,0.18)]';
