@@ -170,7 +170,7 @@ export function extractPatientBundleFrame(rawValue: string): {
     const compactFrame = url.searchParams.get('f') || '';
     const legacyFrame = url.searchParams.get('bundleFrame') || '';
     const frame = compactFrame ? fromUrlSafeBase64(compactFrame) : legacyFrame;
-    if (!ticket || !frame) return null;
+    if (!frame) return null;
     return {
       frame,
       ticket,
