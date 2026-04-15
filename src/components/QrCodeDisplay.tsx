@@ -16,7 +16,7 @@ interface QrCodeDisplayProps {
 
 export default function QrCodeDisplay({
   data,
-  size = 300,
+  size = 400,
   border = 4,
   className = '',
 }: QrCodeDisplayProps) {

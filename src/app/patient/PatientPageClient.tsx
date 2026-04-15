@@ -82,7 +82,7 @@ export default function PatientPageClient() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [needsRegenerate, setNeedsRegenerate] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
-  const [modalQrSize, setModalQrSize] = useState(320);
+  const [modalQrSize, setModalQrSize] = useState(400);
   // 语音识别相关状态
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionStatus, setTranscriptionStatus] = useState('');
@@ -94,7 +94,7 @@ export default function PatientPageClient() {
 
   useEffect(() => {
     const updateModalQrSize = () => {
-      setModalQrSize(Math.max(240, Math.min(window.innerWidth - 48, 420)));
+      setModalQrSize(Math.max(240, Math.min(window.innerWidth, 420)));
     };
     updateModalQrSize();
     window.addEventListener('resize', updateModalQrSize);
