@@ -932,7 +932,7 @@ export default function PatientPageClient() {
                   {/* 二维码全屏弹窗 */}
                   {showQrModal && submission && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 sm:p-0">
-                      <div className="relative w-full max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl sm:max-w-[500px]">
+                      <div className="relative w-full max-h-[90vh] overflow-y-auto rounded-3xl bg-white py-6 shadow-2xl sm:max-w-[500px]">
                         <button
                           onClick={() => setShowQrModal(false)}
                           className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-[#f0f4ff] text-[#5f7cff] hover:bg-[#e6ebff]"

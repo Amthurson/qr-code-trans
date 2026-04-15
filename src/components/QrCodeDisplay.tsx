@@ -26,6 +26,8 @@ export default function QrCodeDisplay({
   // 渲染二维码
   useEffect(() => {
     if (!data) {
+      // 如果没有数据，清空 SVG 和错误信息
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSvg('')
       return
     }
