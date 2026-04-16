@@ -162,6 +162,8 @@ export interface OfflineAnswerEntry {
   fieldKey: string;
   questionType: QuestionType;
   value: string | number | string[];
+  optionLabels?: string[];
+  valueText?: string;
 }
 
 export interface OfflineImportPayload {

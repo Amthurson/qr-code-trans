@@ -279,6 +279,19 @@ export default function PatientPageClient() {
     return questions.reduce((list, question) => {
       const answer = answers[keyOf(question)];
       if (!answer) return list;
+      const optionMap = new Map((question.options || []).map((option) => [String(option.id), String(option.label)]));
+      const selectedIds = answer.type === 'multiple'
+        ? [...answer.value].map((item) => String(item)).sort()
+        : (answer.type === 'single' ? [String(answer.value)] : []);
+      const optionLabels = selectedIds.map((id) => optionMap.get(id) || id);
+      const normalizedValue = answer.type === 'multiple'
+        ? selectedIds
+        : (answer.type === 'single' ? String(answer.value) : answer.value);
+      const valueText = answer.type === 'multiple'
+        ? optionLabels.join('、')
+        : (answer.type === 'single'
+          ? (optionLabels[0] || String(answer.value))
+          : String(answer.value));
       list.push({
         templateId: question.templateId,
         templateLabel: question.templateLabel,
@@ -286,7 +299,9 @@ export default function PatientPageClient() {
         questionTitle: question.title,
         fieldKey: question.key,
         questionType: answer.type,
-        value: answer.type === 'multiple' ? [...answer.value].sort() : answer.value,
+        value: normalizedValue,
+        optionLabels,
+        valueText,
       });
       return list;
     }, [] as Array<{
@@ -297,6 +312,8 @@ export default function PatientPageClient() {
       fieldKey: string;
       questionType: Answer['type'];
       value: string | number | string[];
+      optionLabels: string[];
+      valueText: string;
     }>);
   }, [answers, questions]);
 
