@@ -10,12 +10,14 @@ export type QuestionType =
   | 'text'        // 填空题（短文本）
   | 'long-text';  // 问答题（长文本）
 
+export type LocalizedText = string | Record<string, string>;
+
 /**
  * 选项定义
  */
 export interface Option {
   id: string;
-  label: string;
+  label: LocalizedText;
 }
 
 /**
@@ -24,12 +26,12 @@ export interface Option {
 export interface Question {
   id: number;
   type: QuestionType;
-  title: string;
+  title: LocalizedText;
   required: boolean;
   options?: Option[];           // 选择题的选项
   maxSelect?: number;           // 多选最大可选数
   maxLength?: number;           // 文本最大长度
-  placeholder?: string;         // 输入框占位符
+  placeholder?: LocalizedText;  // 输入框占位符
   min?: number;                 // 数值最小值
   max?: number;                 // 数值最大值
 }
@@ -186,7 +188,7 @@ export interface OfflineQuestionnaireBundle {
 export interface QuestionnaireTransferQuestion extends Question {
   key: string;
   templateId: string;
-  templateLabel: string;
+  templateLabel: LocalizedText;
   sourceTemplateIds?: string[];
   mergeKey?: string;
 }
@@ -206,11 +208,13 @@ export interface OfflineQuestionnaireBundlePayload {
   maskUuid: string;
   bundleId: string;
   templateIds: string[];
-  questionnaireTitle: string;
+  preferredLocale?: string;
+  supportedLocales?: string[];
+  questionnaireTitle: LocalizedText;
   issuedAt: string;
   questions: QuestionnaireTransferQuestion[];
   mockFiles: QuestionnaireTransferFile[];
-  notes?: string[];
+  notes?: Array<string | LocalizedText>;
 }
 
 // 容量限制常量

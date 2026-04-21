@@ -13,6 +13,7 @@ import {
 } from '@/lib/offline-questionnaire';
 import type {
   Answer,
+  LocalizedText,
   OfflineIssuePayload,
   OfflineQuestionnaireBundlePayload,
   QuestionnaireTransferQuestion,
@@ -41,6 +42,54 @@ interface TranscriberResult {
 }
 
 type AudioTranscriber = (audio: unknown) => Promise<TranscriberResult>;
+type QuestionnaireLocale = 'en' | 'zh-Hans' | 'zh-Hant';
+
+const LOCALE_SWITCH_ORDER: QuestionnaireLocale[] = ['en', 'zh-Hans', 'zh-Hant'];
+const LOCALE_LABELS: Record<QuestionnaireLocale, string> = {
+  en: 'English',
+  'zh-Hans': '简体中文',
+  'zh-Hant': '繁體中文',
+};
+
+function normalizeQuestionnaireLocale(locale: unknown): QuestionnaireLocale {
+  const lower = String(locale || '').trim().toLowerCase().replace(/_/g, '-');
+  if (lower.indexOf('en') === 0) return 'en';
+  if (lower.indexOf('zh-hant') === 0 || lower.indexOf('zh-tw') === 0 || lower.indexOf('zh-hk') === 0 || lower.indexOf('zh-mo') === 0 || lower.indexOf('hant') > -1) {
+    return 'zh-Hant';
+  }
+  return 'zh-Hans';
+}
+
+function localeAliases(locale: QuestionnaireLocale): string[] {
+  if (locale === 'en') return ['en', 'en-us', 'en_us'];
+  if (locale === 'zh-Hant') return ['zh-hant', 'zh-tw', 'zh_tw', 'zh-hk', 'zh_hk', 'zh-mo', 'zh_mo'];
+  return ['zh-hans', 'zh-cn', 'zh_cn', 'zh'];
+}
+
+function resolveLocalizedText(value: LocalizedText | null | undefined, locale: QuestionnaireLocale): string {
+  if (value === null || typeof value === 'undefined') return '';
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (typeof value !== 'object' || Array.isArray(value)) return String(value);
+  const keyMap = Object.keys(value).reduce((acc, key) => {
+    acc[String(key || '').trim().toLowerCase()] = key;
+    return acc;
+  }, {} as Record<string, string>);
+  const localePriority: QuestionnaireLocale[] = [locale, 'zh-Hans', 'zh-Hant', 'en'];
+  for (let i = 0; i < localePriority.length; i += 1) {
+    const aliases = localeAliases(localePriority[i]);
+    for (let j = 0; j < aliases.length; j += 1) {
+      const alias = aliases[j];
+      const mappedKey = keyMap[alias];
+      if (!mappedKey) continue;
+      const current = value[mappedKey];
+      if (current !== null && typeof current !== 'undefined' && String(current).trim()) {
+        return String(current);
+      }
+    }
+  }
+  const first = Object.values(value).find((item) => item !== null && typeof item !== 'undefined' && String(item).trim());
+  return first ? String(first) : '';
+}
 
 function keyOf(question: QuestionnaireTransferQuestion): string {
   return `${question.templateId}:${question.id}`;
@@ -53,8 +102,17 @@ function isFilled(answer?: Answer): boolean {
   return true;
 }
 
-function placeholderOf(question: QuestionnaireTransferQuestion): string {
-  if (question.placeholder) return question.placeholder;
+function placeholderOf(question: QuestionnaireTransferQuestion, locale: QuestionnaireLocale): string {
+  const localized = resolveLocalizedText(question.placeholder, locale);
+  if (localized) return localized;
+  if (locale === 'en') {
+    if (question.type === 'numeric') return 'Please enter a number';
+    return question.type === 'long-text' ? 'Please describe in detail' : 'Please enter your answer';
+  }
+  if (locale === 'zh-Hant') {
+    if (question.type === 'numeric') return '請輸入數值';
+    return question.type === 'long-text' ? '請詳細描述' : '請輸入回答';
+  }
   if (question.type === 'numeric') return '请输入数值';
   return question.type === 'long-text' ? '请详细描述' : '请输入回答';
 }
@@ -83,6 +141,7 @@ export default function PatientPageClient() {
   const [needsRegenerate, setNeedsRegenerate] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [modalQrSize, setModalQrSize] = useState(400);
+  const [activeLocale, setActiveLocale] = useState<QuestionnaireLocale>('zh-Hans');
   // 语音识别相关状态
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionStatus, setTranscriptionStatus] = useState('');
@@ -233,6 +292,11 @@ export default function PatientPageClient() {
 
   const questions = useMemo(() => bundlePayload?.questions || [], [bundlePayload]);
 
+  useEffect(() => {
+    if (!bundlePayload) return;
+    setActiveLocale(normalizeQuestionnaireLocale(bundlePayload.preferredLocale));
+  }, [bundlePayload]);
+
   const questionnaires = useMemo(() => {
     if (!bundlePayload) return [] as QuestionnaireGroup[];
     return bundlePayload.templateIds
@@ -243,7 +307,7 @@ export default function PatientPageClient() {
         const requiredDone = groupQuestions.filter((question) => question.required && isFilled(answers[keyOf(question)])).length;
         return {
           id: templateId,
-          label: groupQuestions[0]?.templateLabel || templateId,
+          label: resolveLocalizedText(groupQuestions[0]?.templateLabel, activeLocale) || templateId,
           questions: groupQuestions,
           requiredTotal,
           requiredDone,
@@ -251,7 +315,7 @@ export default function PatientPageClient() {
         };
       })
       .filter(Boolean) as QuestionnaireGroup[];
-  }, [answers, bundlePayload, questions]);
+  }, [activeLocale, answers, bundlePayload, questions]);
 
   const activeQuestionnaire = useMemo(
     () => questionnaires.find((item) => item.id === activeQuestionnaireId) || null,
@@ -276,10 +340,11 @@ export default function PatientPageClient() {
   }, [submission]);
 
   const answerEntries = useMemo(() => {
+    const multiValueSeparator = activeLocale === 'en' ? ', ' : '、';
     return questions.reduce((list, question) => {
       const answer = answers[keyOf(question)];
       if (!answer) return list;
-      const optionMap = new Map((question.options || []).map((option) => [String(option.id), String(option.label)]));
+      const optionMap = new Map((question.options || []).map((option) => [String(option.id), resolveLocalizedText(option.label, activeLocale)]));
       const selectedIds = answer.type === 'multiple'
         ? [...answer.value].map((item) => String(item)).sort()
         : (answer.type === 'single' ? [String(answer.value)] : []);
@@ -288,15 +353,15 @@ export default function PatientPageClient() {
         ? selectedIds
         : (answer.type === 'single' ? String(answer.value) : answer.value);
       const valueText = answer.type === 'multiple'
-        ? optionLabels.join('、')
+        ? optionLabels.join(multiValueSeparator)
         : (answer.type === 'single'
           ? (optionLabels[0] || String(answer.value))
           : String(answer.value));
       list.push({
         templateId: question.templateId,
-        templateLabel: question.templateLabel,
+        templateLabel: resolveLocalizedText(question.templateLabel, activeLocale),
         questionId: question.id,
-        questionTitle: question.title,
+        questionTitle: resolveLocalizedText(question.title, activeLocale),
         fieldKey: question.key,
         questionType: answer.type,
         value: normalizedValue,
@@ -315,7 +380,7 @@ export default function PatientPageClient() {
       optionLabels: string[];
       valueText: string;
     }>);
-  }, [answers, questions]);
+  }, [activeLocale, answers, questions]);
 
   const updateAnswer = useCallback((question: QuestionnaireTransferQuestion, answer?: Answer) => {
     const answerKey = keyOf(question);
@@ -623,6 +688,38 @@ export default function PatientPageClient() {
               <span>14:30</span>
               <span className="font-mono">{bundlePayload.bundleId}</span>
             </div>
+            <div className="mt-3 rounded-[18px] border border-[#dbe4ff] bg-white px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-[15px] font-semibold text-[#20315f]">
+                    {resolveLocalizedText(bundlePayload.questionnaireTitle, activeLocale) || bundlePayload.bundleId}
+                  </div>
+                  <div className="mt-1 text-xs text-[#8a99c3]">Language</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {LOCALE_SWITCH_ORDER
+                    .filter((locale) => {
+                      const supported = Array.isArray(bundlePayload.supportedLocales) ? bundlePayload.supportedLocales : [];
+                      if (!supported.length) return true;
+                      return supported.some((item) => normalizeQuestionnaireLocale(item) === locale);
+                    })
+                    .map((locale) => (
+                      <button
+                        key={locale}
+                        type="button"
+                        onClick={() => setActiveLocale(locale)}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                          activeLocale === locale
+                            ? 'border-[#5f7cff] bg-[#eef2ff] text-[#3f59c9]'
+                            : 'border-[#dbe4ff] bg-white text-[#5f6f9d]'
+                        }`}
+                      >
+                        {LOCALE_LABELS[locale]}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </div>
             {activeQuestionnaire && currentQuestion ? (
               <section className="mt-4 space-y-5">
                 <div className="flex items-center justify-between">
@@ -659,7 +756,7 @@ export default function PatientPageClient() {
                   <div className="text-[23px] font-semibold text-[#20315f]">问卷填写页</div>
                   <div className="text-xs text-[#8b9ac3]">关联字段：{currentQuestion.key}</div>
                   <p className="pt-2 text-[22px] leading-[1.55] text-[#20315f]">
-                    {currentQuestion.id}. {currentQuestion.title}
+                    {currentQuestion.id}. {resolveLocalizedText(currentQuestion.title, activeLocale)}
                     {currentQuestion.required && <span className="ml-1 text-[#ff5a67]">*</span>}
                   </p>
 
@@ -680,7 +777,7 @@ export default function PatientPageClient() {
                               ? 'border-[#5f7cff] bg-[#5f7cff] shadow-[inset_0_0_0_4px_#fff]'
                               : 'border-[#bcc8f2]'
                           }`} />
-                          <span>{option.label}</span>
+                          <span>{resolveLocalizedText(option.label, activeLocale)}</span>
                         </button>
                       ))}
                     </div>
@@ -720,7 +817,7 @@ export default function PatientPageClient() {
                             }`}>
                               ✓
                             </span>
-                            <span>{option.label}</span>
+                            <span>{resolveLocalizedText(option.label, activeLocale)}</span>
                           </button>
                         );
                       })}
@@ -741,7 +838,7 @@ export default function PatientPageClient() {
                             nextValue === '' ? undefined : { type: 'numeric', value: Number(nextValue) },
                           );
                         }}
-                        placeholder={placeholderOf(currentQuestion)}
+                        placeholder={placeholderOf(currentQuestion, activeLocale)}
                         className="w-full rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[18px] text-[#20315f] outline-none focus:border-[#5f7cff]"
                       />
                     </div>
@@ -760,7 +857,7 @@ export default function PatientPageClient() {
                               event.target.value === '' ? undefined : { type: 'text', value: event.target.value },
                             );
                           }}
-                          placeholder={placeholderOf(currentQuestion)}
+                          placeholder={placeholderOf(currentQuestion, activeLocale)}
                           className="flex-1 rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[18px] text-[#20315f] outline-none focus:border-[#5f7cff]"
                         />
                         <button
@@ -788,7 +885,7 @@ export default function PatientPageClient() {
                               event.target.value === '' ? undefined : { type: 'long-text', value: event.target.value },
                             );
                           }}
-                          placeholder={placeholderOf(currentQuestion)}
+                          placeholder={placeholderOf(currentQuestion, activeLocale)}
                           className="flex-1 rounded-[22px] border border-[#dbe4ff] bg-[#f8faff] px-4 py-4 text-[17px] leading-7 text-[#20315f] outline-none focus:border-[#5f7cff]"
                         />
                         <button
